@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Questions</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-page="questions">
+  <div class="container">
+
+    <!-- Top: concise instructions + back button -->
+    <div class="card">
+      <div class="badge">Instructions</div>
+      <p>Answer the five questions about the passage. You may go back to reread the passage at any time.</p>
+      <button class="secondary" id="backToPassage">← Back to Passage</button>
+    </div>
+
+    <!-- Full-width questions -->
+    <div class="card" style="margin-top:16px;">
+      <div id="qwrap">Loading questions...</div>
+      <div class="right" style="margin-top:12px;">
+        <button id="submit">Submit Answers →</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

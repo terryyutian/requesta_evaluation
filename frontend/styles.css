@@ -1,0 +1,56 @@
+:root {
+  --bg: #0f172a;
+  --card: #111827;
+  --muted: #94a3b8;
+  --text: #e5e7eb;
+  --accent: #22c55e;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --ring: #22c55e33;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  background: linear-gradient(180deg, #0b1220, var(--bg));
+  color: var(--text);
+}
+
+.container {
+  max-width: 900px; margin: 40px auto; padding: 24px;
+  background: linear-gradient(180deg, #0b1220, #0b1220);
+}
+
+.card {
+  background: linear-gradient(180deg, #0b1220, #0b1020);
+  border: 1px solid #1f2937; border-radius: 16px; padding: 24px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.35), inset 0 0 0 1px #243145;
+}
+
+h1, h2 { margin-top: 0; }
+button {
+  background: var(--accent); color: #052e16; border: none; padding: 12px 18px;
+  border-radius: 10px; cursor: pointer; font-weight: 700;
+}
+button.secondary { background: #1f2937; color: var(--text); }
+
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.right { text-align: right; }
+
+.badge { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #1f2937; color: var(--muted); font-size: 12px; }
+.ok { color: var(--accent); }
+.err { color: var(--danger); }
+label { display:block; margin: 12px 0 4px; color: var(--muted); }
+input, select, textarea {
+  width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #263245; background: #0b1220; color: var(--text);
+}
+fieldset { border: 1px dashed #2a364a; border-radius: 12px; padding: 16px; margin: 16px 0; }
+hr { border: none; border-top: 1px solid #1f2937; margin: 24px 0; }
+ul.choices { list-style: none; padding: 0; margin: 0; }
+ul.choices li { margin: 8px 0; padding: 10px 12px; border: 1px solid #243145; border-radius: 10px; }
+.choice input { margin-right: 8px; }
+.qcard { margin: 16px 0; }
+.thumb { cursor:pointer; padding: 6px 10px; border-radius: 8px; background:#172036; border:1px solid #1f2a3f; margin-right:8px; }
+.grid { display:grid; grid-template-columns: 1.2fr 1fr; gap: 24px; }
+.center { text-align:center; }
