@@ -8,8 +8,15 @@
 <body data-page="demographic">
   <div class="container">
     <div class="card">
-      <h1>Demographic Survey</h1>
+      <h1 style="text-align: center;">Demographic Survey</h1>
       <form id="demo-form">
+
+        <!-- Q0 -->
+        <fieldset>
+          <legend><strong>Q0:</strong> What is your Prolific ID?</legend>
+          <input name="prolific_id" required />
+        </fieldset>
+
         <!-- Q1 -->
         <fieldset>
           <legend><strong>Q1:</strong> What is your age? (number only, e.g., 33)</legend>
@@ -20,226 +27,32 @@
         <!-- Q2 -->
         <fieldset>
           <legend><strong>Q2:</strong> What gender do you identify as?</legend>
-          <label><input type="radio" name="q2_gender" value="Male" required /> Male</label>
-          <label><input type="radio" name="q2_gender" value="Female" /> Female</label>
-          <label><input type="radio" name="q2_gender" value="Non-binary / third gender" /> Non-binary / third gender</label>
-          <label><input type="radio" name="q2_gender" value="Prefer not to say" /> Prefer not to say</label>
+          <ul class="options">
+            <li><label class="option-row"><input type="radio" name="q2_gender" value="Male" required><span>Male</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q2_gender" value="Female"><span>Female</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q2_gender" value="Non-binary / third gender"><span>Non-binary / third gender</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q2_gender" value="Prefer not to say"><span>Prefer not to say</span></label></li>
+          </ul>
         </fieldset>
 
         <!-- Q3 -->
         <fieldset>
-          <legend><strong>Q3:</strong> What is your country (or countries) of citizenship? <em>(Select all that apply)</em>.</legend>
-          <p class="badge">Tip: Hold Ctrl/Cmd (desktop) or tap multiple items (mobile) to select more than one.</p>
-          <select name="citizenship" multiple required size="10">
-            <option>Afghanistan</option>
-            <option>Albania</option>
-            <option>Algeria</option>
-            <option>Andorra</option>
-            <option>Angola</option>
-            <option>Antigua and Barbuda</option>
-            <option>Argentina</option>
-            <option>Armenia</option>
-            <option>Australia</option>
-            <option>Austria</option>
-            <option>Azerbaijan</option>
-            <option>Bahamas</option>
-            <option>Bahrain</option>
-            <option>Bangladesh</option>
-            <option>Barbados</option>
-            <option>Belarus</option>
-            <option>Belgium</option>
-            <option>Belize</option>
-            <option>Benin</option>
-            <option>Bhutan</option>
-            <option>Bolivia</option>
-            <option>Bosnia and Herzegovina</option>
-            <option>Botswana</option>
-            <option>Brazil</option>
-            <option>Brunei Darussalam</option>
-            <option>Bulgaria</option>
-            <option>Burkina Faso</option>
-            <option>Burundi</option>
-            <option>Cambodia</option>
-            <option>Cameroon</option>
-            <option>Canada</option>
-            <option>Cape Verde</option>
-            <option>Central African Republic</option>
-            <option>Chad</option>
-            <option>Chile</option>
-            <option>China</option>
-            <option>Colombia</option>
-            <option>Comoros</option>
-            <option>Congo, Republic of the...</option>
-            <option>Costa Rica</option>
-            <option>Côte d'Ivoire</option>
-            <option>Croatia</option>
-            <option>Cuba</option>
-            <option>Cyprus</option>
-            <option>Czech Republic</option>
-            <option>Democratic Republic of the Congo</option>
-            <option>Denmark</option>
-            <option>Djibouti</option>
-            <option>Dominica</option>
-            <option>Dominican Republic</option>
-            <option>Ecuador</option>
-            <option>Egypt</option>
-            <option>El Salvador</option>
-            <option>Equatorial Guinea</option>
-            <option>Eritrea</option>
-            <option>Estonia</option>
-            <option>Ethiopia</option>
-            <option>Fiji</option>
-            <option>Finland</option>
-            <option>France</option>
-            <option>Gabon</option>
-            <option>Gambia</option>
-            <option>Georgia</option>
-            <option>Germany</option>
-            <option>Ghana</option>
-            <option>Greece</option>
-            <option>Grenada</option>
-            <option>Guatemala</option>
-            <option>Guinea</option>
-            <option>Guinea-Bissau</option>
-            <option>Guyana</option>
-            <option>Haiti</option>
-            <option>Honduras</option>
-            <option>Hong Kong (S.A.R.)</option>
-            <option>Hungary</option>
-            <option>Iceland</option>
-            <option>India</option>
-            <option>Indonesia</option>
-            <option>Iran</option>
-            <option>Iraq</option>
-            <option>Ireland</option>
-            <option>Israel</option>
-            <option>Italy</option>
-            <option>Jamaica</option>
-            <option>Japan</option>
-            <option>Jordan</option>
-            <option>Kazakhstan</option>
-            <option>Kenya</option>
-            <option>Kiribati</option>
-            <option>Kuwait</option>
-            <option>Kyrgyzstan</option>
-            <option>Lao People's Democratic Republic</option>
-            <option>Latvia</option>
-            <option>Lebanon</option>
-            <option>Lesotho</option>
-            <option>Liberia</option>
-            <option>Libyan Arab Jamahiriya</option>
-            <option>Liechtenstein</option>
-            <option>Lithuania</option>
-            <option>Luxembourg</option>
-            <option>Madagascar</option>
-            <option>Malawi</option>
-            <option>Malaysia</option>
-            <option>Maldives</option>
-            <option>Mali</option>
-            <option>Malta</option>
-            <option>Marshall Islands</option>
-            <option>Mauritania</option>
-            <option>Mauritius</option>
-            <option>Mexico</option>
-            <option>Micronesia, Federated States of...</option>
-            <option>Monaco</option>
-            <option>Mongolia</option>
-            <option>Montenegro</option>
-            <option>Morocco</option>
-            <option>Mozambique</option>
-            <option>Myanmar</option>
-            <option>Namibia</option>
-            <option>Nauru</option>
-            <option>Nepal</option>
-            <option>Netherlands</option>
-            <option>New Zealand</option>
-            <option>Nicaragua</option>
-            <option>Niger</option>
-            <option>Nigeria</option>
-            <option>North Korea</option>
-            <option>Norway</option>
-            <option>Oman</option>
-            <option>Pakistan</option>
-            <option>Palau</option>
-            <option>Panama</option>
-            <option>Papua New Guinea</option>
-            <option>Paraguay</option>
-            <option>Peru</option>
-            <option>Philippines</option>
-            <option>Poland</option>
-            <option>Portugal</option>
-            <option>Qatar</option>
-            <option>Republic of Moldova</option>
-            <option>Romania</option>
-            <option>Russian Federation</option>
-            <option>Rwanda</option>
-            <option>Saint Kitts and Nevis</option>
-            <option>Saint Lucia</option>
-            <option>Saint Vincent and the Grenadines</option>
-            <option>Samoa</option>
-            <option>San Marino</option>
-            <option>Sao Tome and Principe</option>
-            <option>Saudi Arabia</option>
-            <option>Senegal</option>
-            <option>Serbia</option>
-            <option>Seychelles</option>
-            <option>Sierra Leone</option>
-            <option>Singapore</option>
-            <option>Slovakia</option>
-            <option>Slovenia</option>
-            <option>Solomon Islands</option>
-            <option>Somalia</option>
-            <option>South Africa</option>
-            <option>South Korea</option>
-            <option>Spain</option>
-            <option>Sri Lanka</option>
-            <option>Sudan</option>
-            <option>Suriname</option>
-            <option>Swaziland</option>
-            <option>Sweden</option>
-            <option>Switzerland</option>
-            <option>Syrian Arab Republic</option>
-            <option>Tajikistan</option>
-            <option>Thailand</option>
-            <option>The former Yugoslav Republic of Macedonia</option>
-            <option>Timor-Leste</option>
-            <option>Togo</option>
-            <option>Tonga</option>
-            <option>Trinidad and Tobago</option>
-            <option>Tunisia</option>
-            <option>Turkey</option>
-            <option>Turkmenistan</option>
-            <option>Tuvalu</option>
-            <option>Uganda</option>
-            <option>Ukraine</option>
-            <option>United Arab Emirates</option>
-            <option>United Kingdom of Great Britain and Northern Ireland</option>
-            <option>United Republic of Tanzania</option>
-            <option>United States of America</option>
-            <option>Uruguay</option>
-            <option>Uzbekistan</option>
-            <option>Vanuatu</option>
-            <option>Venezuela, Bolivarian Republic of...</option>
-            <option>Viet Nam</option>
-            <option>Yemen</option>
-            <option>Zambia</option>
-            <option>Zimbabwe</option>
-          </select>
+          <legend><strong>Q3:</strong> What is your country (or countries) of citizenship? <em>(Select all that apply)</em></legend>
+          <ul id="citizenshipOptions" class="options"></ul>
         </fieldset>
 
         <!-- Q4 -->
         <fieldset>
           <legend><strong>Q4:</strong> Which race / ethnicity best describes you?</legend>
-          <label><input type="radio" name="q4_ethnicity" value="American Indian or Alaska Native" required /> American Indian or Alaska Native</label>
-          <label><input type="radio" name="q4_ethnicity" value="Asian" /> Asian</label>
-          <label><input type="radio" name="q4_ethnicity" value="Black or African American" /> Black or African American</label>
-          <label><input type="radio" name="q4_ethnicity" value="Hispanic or Latino" /> Hispanic or Latino</label>
-          <label><input type="radio" name="q4_ethnicity" value="Native Hawaiian or Pacific Islander" /> Native Hawaiian or Pacific Islander</label>
-          <label><input type="radio" name="q4_ethnicity" value="White" /> White</label>
-          <label>
-            <input type="radio" name="q4_ethnicity" value="Multiple ethnicity / Other" />
-            Multiple ethnicity / Other (please specify)
-          </label>
+          <ul class="options">
+            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="American Indian or Alaska Native" required><span>American Indian or Alaska Native</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Asian"><span>Asian</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Black or African American"><span>Black or African American</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Hispanic or Latino"><span>Hispanic or Latino</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Native Hawaiian or Pacific Islander"><span>Native Hawaiian or Pacific Islander</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="White"><span>White</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Multiple ethnicity / Other"><span>Multiple ethnicity / Other (please specify)</span></label></li>
+          </ul>
           <input name="q4_ethnicity_other" placeholder="If other, please specify" style="margin-top:8px;" />
         </fieldset>
 
@@ -263,26 +76,28 @@
         </fieldset>
 
         <!-- Q6 -->
-        <fieldset>
-          <legend><strong>Q6:</strong> Is English your first language?</legend>
-          <label><input type="radio" name="q6_english_first" value="Yes" required /> Yes</label>
-          <label><input type="radio" name="q6_english_first" value="No" /> No</label>
-          <p class="badge">If “Yes”, you may skip Q7–Q10.</p>
-        </fieldset>
+      <fieldset>
+        <legend><strong>Q6:</strong> Is English your first language?</legend>
+        <ul class="options">
+          <li><label class="option-row"><input type="radio" name="q6_english_first" value="Yes" required><span>Yes</span></label></li>
+          <li><label class="option-row"><input type="radio" name="q6_english_first" value="No"><span>No</span></label></li>
+        </ul>
+        <p class="badge">If “Yes”, you may skip Q7–Q10.</p>
+      </fieldset>
 
         <!-- Q7–Q10 (conditionally shown if Q6 = No) -->
         <fieldset id="l2-block">
           <legend><strong>Q7–Q10:</strong> If English is not your first language</legend>
-          <label>Q7: Native/first language (not English)
+          <label class="option-row">Q7: Native/first language (not English)
             <input name="q7_native_language" />
           </label>
-          <label>Q8: At what age did you start learning English? (number only)
+          <label class="option-row">Q8: At what age did you start learning English? (number only)
             <input name="q8_start_age" type="number" min="0" step="1" inputmode="numeric" />
           </label>
-          <label>Q9: How many years have you studied English? (e.g., 8.5)
+          <label class="option-row">Q9: How many years have you studied English? (e.g., 8.5)
             <input name="q9_years_studied" type="number" min="0" step="0.1" inputmode="decimal" />
           </label>
-          <label>Q10: How many years have you been in the U.S.? (e.g., 2)
+          <label class="option-row">Q10: How many years have you been in the U.S.? (e.g., 2)
             <input name="q10_years_in_us" type="number" min="0" step="0.1" inputmode="decimal" />
           </label>
         </fieldset>
@@ -290,24 +105,26 @@
         <!-- Q11 -->
         <fieldset>
           <legend><strong>Q11:</strong> I enjoy reading</legend>
-          <div>
-            <label><input type="radio" name="q11_reading_enjoyment" value="1" required /> 1 - Strongly Disagree</label>
-            <label><input type="radio" name="q11_reading_enjoyment" value="2" /> 2 - Disagree</label>
-            <label><input type="radio" name="q11_reading_enjoyment" value="3" /> 3 - Somewhat Disagree</label>
-            <label><input type="radio" name="q11_reading_enjoyment" value="4" /> 4 - Somewhat Agree</label>
-            <label><input type="radio" name="q11_reading_enjoyment" value="5" /> 5 - Agree</label>
-            <label><input type="radio" name="q11_reading_enjoyment" value="6" /> 6 - Strongly Agree</label>
-          </div>
+          <ul class="options">
+            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="1" required><span>1 - Strongly Disagree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="2"><span>2 - Disagree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="3"><span>3 - Somewhat Disagree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="4"><span>4 - Somewhat Agree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="5"><span>5 - Agree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="6"><span>6 - Strongly Agree</span></label></li>
+          </ul>
         </fieldset>
-
+        
         <!-- Q12 -->
         <fieldset>
           <legend><strong>Q12:</strong> Hours per week you read material not required by instructors</legend>
-          <label><input type="radio" name="q12_reading_hours" value="None" required /> None</label>
-          <label><input type="radio" name="q12_reading_hours" value="Less than 1 hour" /> Less than 1 hour</label>
-          <label><input type="radio" name="q12_reading_hours" value="1-2 hours" /> 1–2 hours</label>
-          <label><input type="radio" name="q12_reading_hours" value="3-4 hours" /> 3–4 hours</label>
-          <label><input type="radio" name="q12_reading_hours" value="5 or more hours" /> 5 or more hours</label>
+          <ul class="options">
+            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="None" required><span>None</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="Less than 1 hour"><span>Less than 1 hour</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="1-2 hours"><span>1–2 hours</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="3-4 hours"><span>3–4 hours</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="5 or more hours"><span>5 or more hours</span></label></li>
+          </ul>
         </fieldset>
 
         <div class="right">

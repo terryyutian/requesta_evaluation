@@ -12,6 +12,7 @@ from schemas import (
 from security import new_session_id
 from randomizer import random_two_passages, maybe_shuffle_choices
 from data import PASSAGES, QUESTIONS, VOCAB
+from helper import normalize_demographics
 import storage
 
 app = FastAPI(title="Study Data Collection API", version="0.1.0")
@@ -41,10 +42,16 @@ def session_start(req: SessionStartRequest):
 
 # --- Demographics ---
 @app.post("/api/demographics")
-def submit_demographics(payload: DemographicsPayload, session_id: str):
+def submit_demographics(payload: Dict[str, Any] = Body(...), session_id: str = ""):
     if session_id not in storage.SESSIONS:
         raise HTTPException(status_code=404, detail="Session not found.")
-    storage.save_demographics(session_id, payload.model_dump())
+
+    normalized = normalize_demographics(payload)
+
+    # Validate + coerce into your Pydantic model (keeps type safety)
+    model = DemographicsPayload(**normalized)
+
+    storage.save_demographics(session_id, model.model_dump())
     return {"ok": True}
 
 # --- Random assignment ---
@@ -73,10 +80,10 @@ def get_questions(passage_id: str, session_id: str):
     qs = QUESTIONS.get(passage_id)
     if not qs or len(qs) < 5:
         raise HTTPException(status_code=404, detail="No questions for passage.")
-    shuffled = maybe_shuffle_choices(qs, seed=None)
+    #shuffled = maybe_shuffle_choices(qs, seed=None)
     return QuestionsResponse(
         passage_id=passage_id,
-        questions=shuffled
+        questions=qs
     )
 
 # --- Submit MCQs ---

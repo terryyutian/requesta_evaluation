@@ -88,7 +88,41 @@ async function initConsent() {
 async function initDemographic() {
   ensureSessionOrRedirect();
 
-  // Toggle Other text for Q4
+  // --- Render citizenship checkboxes (Q3) ---
+  const COUNTRIES = [
+    "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria",
+    "Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan",
+    "Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei Darussalam","Bulgaria","Burkina Faso","Burundi","Cambodia","Cameroon",
+    "Canada","Cape Verde","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo, Republic of the...","Costa Rica",
+    "Côte d'Ivoire","Croatia","Cuba","Cyprus","Czech Republic","Democratic Republic of the Congo","Denmark","Djibouti","Dominica","Dominican Republic",
+    "Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Ethiopia","Fiji","Finland","France",
+    "Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau",
+    "Guyana","Haiti","Honduras","Hong Kong (S.A.R.)","Hungary","Iceland","India","Indonesia","Iran","Iraq",
+    "Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kiribati","Kuwait",
+    "Kyrgyzstan","Lao People's Democratic Republic","Latvia","Lebanon","Lesotho","Liberia","Libyan Arab Jamahiriya","Liechtenstein","Lithuania","Luxembourg",
+    "Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico",
+    "Micronesia, Federated States of...","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nauru","Nepal",
+    "Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","Norway","Oman","Pakistan","Palau",
+    "Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Republic of Moldova","Romania",
+    "Russian Federation","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","Sao Tome and Principe","Saudi Arabia","Senegal",
+    "Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea",
+    "Spain","Sri Lanka","Sudan","Suriname","Swaziland","Sweden","Switzerland","Syrian Arab Republic","Tajikistan","Thailand",
+    "The former Yugoslav Republic of Macedonia","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu","Uganda",
+    "Ukraine","United Arab Emirates","United Kingdom of Great Britain and Northern Ireland","United Republic of Tanzania","United States of America","Uruguay","Uzbekistan","Vanuatu","Venezuela, Bolivarian Republic of...","Viet Nam",
+    "Yemen","Zambia","Zimbabwe"
+  ];
+
+  const civWrap = document.getElementById("citizenshipOptions");
+  civWrap.innerHTML = COUNTRIES.map(c => `
+    <li>
+      <label class="option-row">
+        <input type="checkbox" name="citizenship" value="${c}">
+        <span>${c}</span>
+      </label>
+    </li>
+  `).join("");
+
+  // --- existing logic for Q4 "Other" and Q6 skip ---
   function syncEthnicityOther() {
     const otherChecked = document.querySelector('input[name="q4_ethnicity"][value="Multiple ethnicity / Other"]')?.checked;
     const otherInput = document.querySelector('input[name="q4_ethnicity_other"]');
@@ -97,15 +131,11 @@ async function initDemographic() {
       if (!otherChecked) otherInput.value = "";
     }
   }
-
-  // Show/hide Q7–Q10 when Q6 = No
   function syncL2Block() {
     const val = (document.querySelector('input[name="q6_english_first"]:checked') || {}).value;
     const block = document.getElementById("l2-block");
     const needL2 = (val === "No");
     block.style.display = needL2 ? "block" : "none";
-
-    // Conditionally require Q7–Q10 only if needed
     ["q7_native_language","q8_start_age","q9_years_studied","q10_years_in_us"].forEach(name => {
       const el = document.querySelector(`[name="${name}"]`);
       if (!el) return;
@@ -113,38 +143,32 @@ async function initDemographic() {
       else { el.removeAttribute("required"); el.value = ""; }
     });
   }
-
-  // initial sync
   syncEthnicityOther();
   syncL2Block();
-
-  // listeners
   document.querySelectorAll('input[name="q4_ethnicity"]').forEach(el => el.addEventListener("change", syncEthnicityOther));
   document.querySelectorAll('input[name="q6_english_first"]').forEach(el => el.addEventListener("change", syncL2Block));
 
+  // --- submission ---
   const form = qs("#demo-form");
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
     const fd = new FormData(form);
-    // start with scalar fields
     const payload = Object.fromEntries(fd.entries());
-    // capture multi-select citizenship as an array
-    payload.citizenship = fd.getAll("citizenship");
 
-    // Age validation (must be number ≥ 18)
+    // Multi-select citizenship from checkboxes
+    payload.citizenship = Array.from(document.querySelectorAll('input[name="citizenship"]:checked')).map(i => i.value);
+
+    // Age validation
     const age = Number(payload.q1_age);
     if (!Number.isFinite(age) || age < 18) {
       alert("You must be at least 18 years old to participate.");
       return;
     }
 
-    // If Q4 isn't "Other", drop the free-text
     if (payload.q4_ethnicity !== "Multiple ethnicity / Other") {
       delete payload.q4_ethnicity_other;
     }
-
-    // If Q6 = Yes, drop Q7–Q10 to respect skip
     if (payload.q6_english_first === "Yes") {
       delete payload.q7_native_language;
       delete payload.q8_start_age;
@@ -215,8 +239,9 @@ async function initQuestions() {
       <ul class="choices">
         ${q.choices.map(c => `
           <li class="choice">
-            <label>
-              <input type="radio" name="${q.id}" value="${c.id}"> ${c.text}
+            <label class="option-row">
+              <input type="radio" name="${q.id}" value="${c.id}">
+              <span>${c.text}</span>
             </label>
           </li>`).join("")}
       </ul>
@@ -279,22 +304,43 @@ async function initPostTask() {
 
   const right = qs("#review");
   right.innerHTML = "";
+
   data.questions.forEach(q => {
-    const row = document.createElement("div"); row.className = "card";
+    const row = document.createElement("div");
+    row.className = "card";
+
     const icon = q.is_correct ? "✅" : "❌";
-    const you = q.choices.find(c => c.id === q.user_choice_id)?.text || "(no answer)";
-    const correct = q.choices.find(c => c.id === q.correct_choice_id)?.text || "(unknown)";
+
+    // Build full option list with markers for correct and user's choice
+    const listHTML = q.choices.map(c => {
+      const isUser = c.id === q.user_choice_id;
+      const isCorrect = c.id === q.correct_choice_id;
+
+      const badges = [
+        isCorrect ? '<span class="badge-sm ok">Correct</span>' : '',
+        isUser ? '<span class="badge-sm">Your choice</span>' : ''
+      ].join(' ');
+
+      return `
+        <li class="${isCorrect ? 'correct' : ''} ${isUser ? 'selected' : ''}">
+          <div class="choice-line">
+            <span>${c.text}</span> ${badges}
+          </div>
+        </li>`;
+    }).join("");
 
     row.innerHTML = `
       <div class="badge">${icon} ${q.is_correct ? "Correct" : "Incorrect"}</div>
       <h3>${q.prompt}</h3>
-      <p><b>Your answer:</b> ${you}</p>
-      <p><b>Correct answer:</b> ${correct}</p>
-      <div>
+      <ul class="review-choices">
+        ${listHTML}
+      </ul>
+      <div style="margin-top:8px;">
         <span class="thumb" data-q="${q.question_id}" data-v="1">👍</span>
         <span class="thumb" data-q="${q.question_id}" data-v="-1">👎</span>
       </div>
     `;
+
     right.appendChild(row);
   });
 

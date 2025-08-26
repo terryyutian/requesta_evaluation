@@ -35,6 +35,29 @@ button {
 }
 button.secondary { background: #1f2937; color: var(--text); }
 
+/* Reusable list for radio/checkbox groups */
+ul.options {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+ul.options li {
+  margin: 6px 0;
+}
+
+/* Keep icon-left alignment tight */
+ul.options li label.option-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.passage {
+  white-space: pre-wrap; /* preserves \n and wraps long lines */
+  /* pre-line also works; it collapses multiple spaces but keeps \n as line breaks */
+  /* white-space: pre-line; */
+}
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .right { text-align: right; }
 
@@ -42,15 +65,70 @@ button.secondary { background: #1f2937; color: var(--text); }
 .ok { color: var(--accent); }
 .err { color: var(--danger); }
 label { display:block; margin: 12px 0 4px; color: var(--muted); }
-input, select, textarea {
-  width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #263245; background: #0b1220; color: var(--text);
+input:not([type="radio"]):not([type="checkbox"]),
+select,
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #263245;
+  background: #0b1220;
+  color: var(--text);
+}
+
+/* Well-aligned option rows used anywhere we show radio/checkbox options */
+label.option-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 12px 6px 0;
+  line-height: 1.4;
+  cursor: pointer;
+}
+label.option-row input[type="radio"],
+label.option-row input[type="checkbox"] {
+  width: auto;
+  height: auto;
+  margin: 0;
 }
 fieldset { border: 1px dashed #2a364a; border-radius: 12px; padding: 16px; margin: 16px 0; }
 hr { border: none; border-top: 1px solid #1f2937; margin: 24px 0; }
 ul.choices { list-style: none; padding: 0; margin: 0; }
+ul.choices li label { display: inline-flex; align-items: center; gap: 8px; }
 ul.choices li { margin: 8px 0; padding: 10px 12px; border: 1px solid #243145; border-radius: 10px; }
 .choice input { margin-right: 8px; }
 .qcard { margin: 16px 0; }
 .thumb { cursor:pointer; padding: 6px 10px; border-radius: 8px; background:#172036; border:1px solid #1f2a3f; margin-right:8px; }
 .grid { display:grid; grid-template-columns: 1.2fr 1fr; gap: 24px; }
 .center { text-align:center; }
+.option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px 16px;
+}
+/* Post-task full choice list */
+.review-choices {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+.review-choices li {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid #243145;
+  border-radius: 8px;
+}
+.review-choices li.selected { background: #141b2d; }
+.review-choices li.correct {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--ring) inset;
+}
+.badge-sm {
+  display: inline-block;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #1f2937;
+  color: var(--muted);
+  margin-left: 8px;
+}
