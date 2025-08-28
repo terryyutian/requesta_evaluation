@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import math
+import time
+from collections import defaultdict
 
 from schemas import (
     SessionStartRequest, SessionStartResponse, DemographicsPayload, RandomizeResponse,
@@ -184,9 +186,28 @@ def vocab_answer(payload: VocabAnswerPayload):
     return {"ok": True}
 
 # --- Event logging (copy attempts, focus/blur, rereads, durations, etc.) ---
+# In-memory logs & per-session counters (swap to DB later)
+EVENT_LOG: Dict[str, list] = defaultdict(list)
+SESSION_EVENT_SEQ: Dict[str, int] = defaultdict(int)
+
 @app.post("/api/event")
-def log_event(payload: EventLogPayload):
-    if payload.session_id not in storage.SESSIONS:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    storage.log_event(payload.session_id, payload.event_type, payload.meta)
-    return {"ok": True}
+def api_event(evt: Dict[str, Any]):
+  session_id = evt.get("session_id")
+  if not session_id:
+    raise HTTPException(status_code=400, detail="Missing session_id")
+
+  client_seq = int(evt.get("seq") or 0)
+  last = SESSION_EVENT_SEQ[session_id]
+  # finalize a strictly increasing sequence
+  seq_final = max(last + 1, client_seq)
+  SESSION_EVENT_SEQ[session_id] = seq_final
+
+  record = {
+    "seq": seq_final,                              # <- final total order index
+    "event_type": evt.get("event_type"),
+    "meta": evt.get("meta") or {},
+    "client_ts": int(evt.get("client_ts") or 0),   # client-side timestamp (ms)
+    "server_ts": int(time.time() * 1000),          # server receipt time (ms)
+  }
+  EVENT_LOG[session_id].append(record)
+  return {"ok": True, "seq": seq_final}

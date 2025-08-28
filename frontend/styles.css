@@ -58,6 +58,8 @@ ul.options li label.option-row {
   /* pre-line also works; it collapses multiple spaces but keeps \n as line breaks */
   /* white-space: pre-line; */
 }
+.passage p { margin: 12px 0; }           /* paragraph spacing */
+.passage { line-height: 1.6; }           /* readability */
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .right { text-align: right; }
 
@@ -132,3 +134,58 @@ ul.choices li { margin: 8px 0; padding: 10px 12px; border: 1px solid #243145; bo
   color: var(--muted);
   margin-left: 8px;
 }
+
+/* Dropdown container */
+.dropdown {
+  border: 1px solid #243145;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #0b1220;
+}
+
+/* Summary line (clickable) */
+.dropdown-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  list-style: none;
+  cursor: pointer;
+}
+.dropdown-summary::-webkit-details-marker { display: none; }
+
+.muted { color: var(--muted); font-size: 0.9em; }
+
+/* Panel content */
+.dropdown-panel { margin-top: 10px; }
+
+#citizenshipSearch {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #263245;
+  background: #0b1220;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+/* Scrollable options list inside dropdown */
+.options.scroll {
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid #243145;
+  border-radius: 8px;
+  padding: 8px;
+}
+a.btn {
+  display: inline-block;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #2a3a55;
+  background: #18243a;
+  color: #e6efff;
+  text-decoration: none;
+}
+a.btn:hover { filter: brightness(1.1); }
+/* Keep icon-left alignment for each option */
+ul.options li { margin: 6px 0; }
+ul.options li label.option-row { display: inline-flex; align-items: center; gap: 8px; }

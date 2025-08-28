@@ -34,12 +34,28 @@
             <li><label class="option-row"><input type="radio" name="q2_gender" value="Prefer not to say"><span>Prefer not to say</span></label></li>
           </ul>
         </fieldset>
+              
+      <!-- Q3 -->
+      <fieldset>
+        <legend><strong>Q3:</strong> What is your country (or countries) of citizenship? <em>(Select all that apply)</em></legend>
 
-        <!-- Q3 -->
-        <fieldset>
-          <legend><strong>Q3:</strong> What is your country (or countries) of citizenship? <em>(Select all that apply)</em></legend>
-          <ul id="citizenshipOptions" class="options"></ul>
-        </fieldset>
+        <details id="citizenshipDropdown" class="dropdown">
+          <summary class="dropdown-summary">
+            <span>Select countries…</span>
+            <span id="citizenshipSummary" class="muted">(0 selected)</span>
+          </summary>
+
+          <div class="dropdown-panel">
+            <input type="text" id="citizenshipSearch" placeholder="Search countries…" />
+            <ul id="citizenshipOptions" class="options scroll"></ul>
+            <div class="right" style="margin-top:8px;">
+              <button type="button" id="citizenshipClose" class="secondary">Done</button>
+            </div>
+          </div>
+        </details>
+      </fieldset>
+
+
 
         <!-- Q4 -->
         <fieldset>

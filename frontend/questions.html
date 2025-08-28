@@ -15,11 +15,18 @@
       <button class="secondary" id="backToPassage">← Back to Passage</button>
     </div>
 
-    <!-- Full-width questions -->
+    <!-- Single-question view -->
     <div class="card" style="margin-top:16px;">
-      <div id="qwrap">Loading questions...</div>
-      <div class="right" style="margin-top:12px;">
-        <button id="submit">Submit Answers →</button>
+      <div id="qwrap">Loading question...</div>
+
+      <!-- Nav / progress -->
+      <div class="row" style="align-items:center; grid-template-columns: 1fr auto; margin-top:12px;">
+        <div id="progress" class="badge">Q ? of ?</div>
+        <div class="right">
+          <button class="secondary" id="prevQuestion">← Previous</button>
+          <button id="nextQuestion">Next →</button>
+          <button id="submit" style="display:none;">Submit Answers →</button>
+        </div>
       </div>
     </div>
 
