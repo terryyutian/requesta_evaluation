@@ -1,7 +1,26 @@
 // --- Basic config ---
 const API_BASE = (window.API_BASE_OVERRIDE || "http://127.0.0.1:8000").replace(/\/+$/,"");
 
-// --- Session helpers ---
+// Minimal global error surfacing
+window.addEventListener("error", (e) => {
+  console.error("[global-error]", e.message, e.filename, e.lineno, e.colno, e.error);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("[unhandled-rejection]", e.reason);
+});
+
+// ---- Page instance & tab id ----
+const TAB_ID = sessionStorage.getItem("tab_id") || (() => {
+  const id = (crypto?.randomUUID?.() || ("tab_" + Math.random().toString(36).slice(2)));
+  sessionStorage.setItem("tab_id", id);
+  return id;
+})();
+
+function newPageInstanceId() {
+  return crypto?.randomUUID?.() || ("pg_" + Date.now() + "_" + Math.random().toString(36).slice(2));
+}
+
+// ---- Session helpers ----
 function getSession() { return localStorage.getItem("session_id"); }
 function setSession(id) { localStorage.setItem("session_id", id); }
 function getAssignedPassages() { return JSON.parse(localStorage.getItem("assigned_passages") || "[]"); }
@@ -12,188 +31,51 @@ function setVisitCount(pid, n) { localStorage.setItem(`passage_visits_${pid}`, S
 function getVisitCount(pid) { return Number(localStorage.getItem(`passage_visits_${pid}`) || 0); }
 function setMCQAnswers(pid, answers) { localStorage.setItem(`answers_${pid}`, JSON.stringify(answers)); }
 function getMCQAnswers(pid) { return JSON.parse(localStorage.getItem(`answers_${pid}`) || "{}"); }
-
+function passageOrdinal(idx) {
+  const words = ["One", "Two", "Three", "Four", "Five"];
+  return words[idx] || String(idx + 1);
+}
 // Track the user's current question index for a passage
-function getCurrentQ(pid) {
-  const v = localStorage.getItem(`current_q_${pid}`);
-  return v === null ? null : Number(v);
-}
-function setCurrentQ(pid, qidx) {
-  localStorage.setItem(`current_q_${pid}`, String(qidx));
-}
-function clearCurrentQ(pid) {
-  localStorage.removeItem(`current_q_${pid}`);
-}
+function getCurrentQ(pid) { const v = localStorage.getItem(`current_q_${pid}`); return v === null ? null : Number(v); }
+function setCurrentQ(pid, qidx) { localStorage.setItem(`current_q_${pid}`, String(qidx)); }
+function clearCurrentQ(pid) { localStorage.removeItem(`current_q_${pid}`); }
 
 // --- Event sequencing (per session) ---
 function seqKeyForSession() {
   const sid = getSession();
   return sid ? `evseq_${sid}` : "evseq__anon";
 }
-
-function getLastSeq() {
-  return Number(localStorage.getItem(seqKeyForSession()) || "0");
-}
-function setLastSeq(n) {
-  localStorage.setItem(seqKeyForSession(), String(n));
-}
+function getLastSeq() { return Number(localStorage.getItem(seqKeyForSession()) || "0"); }
+function setLastSeq(n) { localStorage.setItem(seqKeyForSession(), String(n)); }
 
 let seqChannel = null;
 try { seqChannel = new BroadcastChannel("event_seq"); } catch (_) {}
-
 if (seqChannel) {
   seqChannel.onmessage = (e) => {
     const n = Number(e.data || 0);
     if (n > getLastSeq()) setLastSeq(n);
   };
 }
-
 function nextEventSeq() {
-  // simple atomic-ish bump; BroadcastChannel reduces cross-tab clashes
   const n = getLastSeq() + 1;
   setLastSeq(n);
   if (seqChannel) seqChannel.postMessage(n);
   return n;
 }
 
-
-// --- Anti-copy & monitoring ---
+// --- Anti-copy guards (no logging) ---
 function installGuards() {
-  const log = (event_type, meta={}) => {
-    const session_id = getSession();
-    if (!session_id) return;
-    fetch(`${API_BASE}/api/event`, {
-      method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ session_id, event_type, meta })
-    }).catch(()=>{});
-  };
-
-  // Disable copying/cutting/pasting/context
   ["copy","cut","paste","contextmenu"].forEach(evt => {
-    document.addEventListener(evt, (e) => { e.preventDefault(); log("guard_"+evt, {}); });
+    document.addEventListener(evt, (e) => { e.preventDefault(); });
   });
-
   document.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && ["c","x","v","a"].includes(e.key.toLowerCase())) {
       e.preventDefault();
-      log("guard_keyblock", { key: e.key });
     }
   });
-
-  // Visibility & focus/blur
-  document.addEventListener("visibilitychange", () => {
-    log("visibility_change", { hidden: document.hidden });
-  });
-  window.addEventListener("blur", () => log("window_blur", {}));
-  window.addEventListener("focus", () => log("window_focus", {}));
 }
 
-// ---- Focus & away-time logger ----
-function safeUrl(path) {
-  // Allow absolute `${API_BASE}/...` or relative `/api/...`
-  if (typeof API_BASE === "string" && API_BASE) return `${API_BASE}${path}`;
-  return path; // fallback to relative
-}
-
-function sendEvent(event_type, meta = {}) {
-  const session_id = getSession(); if (!session_id) return;
-  const payload = { session_id, event_type, meta, client_ts: Date.now() };
-  try {
-    fetch(safeUrl("/api/event"), {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify(payload),
-      keepalive: true,           // don’t block unloads
-    }).catch(() => {});
-  } catch (_) {}
-}
-
-function beaconEvent(event_type, meta = {}) {
-  const session_id = getSession(); if (!session_id) return;
-  const payload = JSON.stringify({ session_id, event_type, meta, client_ts: Date.now() });
-  try {
-    const ok = navigator.sendBeacon(safeUrl("/api/event"), new Blob([payload], { type: "application/json" }));
-    if (!ok) throw new Error("sendBeacon returned false");
-  } catch {
-    // fallback — still non-blocking
-    try {
-      fetch(safeUrl("/api/event"), {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: payload,
-        keepalive: true,
-      }).catch(() => {});
-    } catch (_) {}
-  }
-}
-
-
-function startFocusLogger(meta = {}) {
-  const page = meta.page || (document.body.dataset.page || "unknown");
-  const baseMeta = { page, ...meta };
-
-  // page_load
-  const now = Date.now();
-  sendEvent("page_load", { ...baseMeta, ts: now });
-
-  // state
-  const state = {
-    inFocus: false,
-    focusStart: null,
-    awayStart: null,
-  };
-
-  function startFocus(reason = "focus") {
-    // Close any away segment first
-    if (state.awayStart != null) {
-      const dur = Date.now() - state.awayStart;
-      sendEvent("away_from_study", {
-        ...baseMeta,
-        start_ts: state.awayStart,
-        duration_ms: dur,
-        reason: "resume",
-      });
-      state.awayStart = null;
-    }
-    if (!state.inFocus) {
-      state.inFocus = true;
-      state.focusStart = Date.now();
-    }
-  }
-
-  function endFocus(reason = "blur") {
-    if (state.inFocus && state.focusStart != null) {
-      const start = state.focusStart;
-      const dur = Date.now() - start;
-      // Use beacon on lifecycle boundaries
-      beaconEvent("focus_segment", {
-        ...baseMeta,
-        start_ts: start,
-        duration_ms: dur,
-        reason,
-      });
-      state.inFocus = false;
-      state.focusStart = null;
-      state.awayStart = Date.now();
-    }
-  }
-
-  // Initial
-  if (!document.hidden) startFocus("initial");
-
-  // Transitions
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) endFocus("visibility_hidden");
-    else startFocus("visibility_visible");
-  });
-  window.addEventListener("focus", () => startFocus("window_focus"));
-  window.addEventListener("blur", () => endFocus("window_blur"));
-  window.addEventListener("pagehide", () => endFocus("pagehide"));
-}
-
-
-
-// --- Utilities ---
+// ---- Utilities ----
 function qs(sel){ return document.querySelector(sel); }
 function qsa(sel){ return Array.from(document.querySelectorAll(sel)); }
 function param(name){ return new URLSearchParams(location.search).get(name); }
@@ -210,25 +92,117 @@ function ensureSessionOrRedirect() {
   if (!getSession()) location.href = "consent.html";
 }
 
-installGuards();
+// URL builder for /api if API_BASE set
+function safeUrl(path) {
+  if (typeof API_BASE === "string" && API_BASE) return `${API_BASE}${path}`;
+  return path;
+}
 
-// --- Page controllers (each page calls its init if present) ---
+// ---- Unified attention logging ("active" | "blur") ----
+let CURRENT_PAGE_INSTANCE_ID = null;
 
-// consent.html
-async function initConsent() {
-  qs("#agree").addEventListener("click", async () => {
-    const r = await api("/api/session/start", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ source: "web", consent: true })
-    });
-    setSession(r.session_id);
+// Marks that a navigation inside our app is happening; used to suppress blur logging
+let SUPPRESS_NEXT_BLUR = false;
+function markInAppNavigation() {
+  SUPPRESS_NEXT_BLUR = true;
+  setTimeout(() => { SUPPRESS_NEXT_BLUR = false; }, 1500);
+}
 
-    // Thank-you "conversation" box mimic (simple modal-style)
-    qs("#thanks").style.display = "block";
-    qs("#next").focus();
+function emitAttention(event_type, page_name, meta = {}) {
+  const session_id = getSession(); if (!session_id) return;
+  const rec = {
+    session_id,
+    seq: nextEventSeq(),          // client proposes; server finalizes
+    event_type,                   // "active" | "blur"
+    page_name,
+    start_time: Date.now(),       // client ms
+    page_instance_id: CURRENT_PAGE_INSTANCE_ID,
+    meta: { ...meta, tab_id: TAB_ID }
+  };
+  try {
+    navigator.sendBeacon(
+      safeUrl("/api/event"),
+      new Blob([JSON.stringify(rec)], { type: "application/json" })
+    );
+  } catch {
+    fetch(safeUrl("/api/event"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rec),
+      keepalive: true
+    }).catch(() => {});
+  }
+}
+
+// Only logs attention; no action/event noise
+function startFocusLogger(meta = {}) {
+  const page_name = meta.page || (document.body.dataset.page || "unknown");
+  CURRENT_PAGE_INSTANCE_ID = newPageInstanceId();
+  const baseMeta = { ...meta, page_instance_id: CURRENT_PAGE_INSTANCE_ID };
+
+  // Initial visible → active
+  if (!document.hidden) emitAttention("active", page_name, baseMeta);
+
+  // Leave study → blur (suppressed during in-app nav)
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (!SUPPRESS_NEXT_BLUR) emitAttention("blur", page_name, baseMeta);
+    } else {
+      emitAttention("active", page_name, baseMeta);
+    }
   });
 
-  qs("#next").addEventListener("click", () => {
+  // Complementary focus/blur (avoid duplicates)
+  window.addEventListener("blur", () => {
+    if (!document.hidden && !SUPPRESS_NEXT_BLUR) emitAttention("blur", page_name, baseMeta);
+  });
+  window.addEventListener("focus", () => {
+    if (!document.hidden) emitAttention("active", page_name, baseMeta);
+  });
+}
+
+installGuards();
+
+// --- Page controllers ---
+// consent.html
+async function initConsent() {
+  // Attention logs require a session; consent occurs pre-session → we skip logging here.
+
+  const agreeBtn = document.getElementById("agree");
+  const thanksBox = document.getElementById("thanks");
+  const nextBtn   = document.getElementById("next");
+
+  if (!agreeBtn || !thanksBox || !nextBtn) {
+    console.error("[consent] Missing DOM nodes", { agreeBtn, thanksBox, nextBtn });
+    return;
+  }
+
+  agreeBtn.type = "button";
+  agreeBtn.addEventListener("click", async () => {
+    agreeBtn.disabled = true;
+    try {
+      const r = await api("/api/session/start", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ source: "web", consent: true })
+      });
+      setSession(r.session_id);
+      thanksBox.style.display = "block";
+      nextBtn.focus();
+    } catch (err) {
+      console.error("[consent] session start failed:", err);
+      alert("We had a temporary issue starting your session, but you can continue.");
+      setSession(crypto?.randomUUID?.() || ("tmp_" + Date.now()));
+      thanksBox.style.display = "block";
+      nextBtn.focus();
+    } finally {
+      agreeBtn.disabled = false;
+    }
+  }, { once: true });
+
+  nextBtn.addEventListener("click", () => {
+    if (!getSession()) { alert("Please click I Agree first."); return; }
+    markInAppNavigation();
     location.href = "demographic.html";
   });
 }
@@ -236,6 +210,7 @@ async function initConsent() {
 // demographic.html
 async function initDemographic() {
   ensureSessionOrRedirect();
+  startFocusLogger({ page: "demographic" });
 
   // --- Render citizenship checkboxes (Q3) ---
   const COUNTRIES = [
@@ -261,14 +236,14 @@ async function initDemographic() {
     "Yemen","Zambia","Zimbabwe"
   ];
 
-  // --- Render citizenship checkboxes into dropdown (Q3) ---
+  // Dropdown plumbing for Q3
   const civWrap = document.getElementById("citizenshipOptions");
   const civSearch = document.getElementById("citizenshipSearch");
   const civSummary = document.getElementById("citizenshipSummary");
   const civDetails = document.getElementById("citizenshipDropdown");
   const civClose = document.getElementById("citizenshipClose");
+  const civDisplay = document.getElementById("citizenshipDisplay");
 
-  // Build list items
   civWrap.innerHTML = COUNTRIES.map(c => `
     <li>
       <label class="option-row">
@@ -278,19 +253,20 @@ async function initDemographic() {
     </li>
   `).join("");
 
-  // Update summary "(N selected)"
   function updateCitizenshipSummary() {
-    const n = document.querySelectorAll('input[name="citizenship"]:checked').length;
-    civSummary.textContent = `(${n} selected)`;
+    const selected = Array.from(document.querySelectorAll('input[name="citizenship"]:checked')).map(i => i.value);
+    const joined = selected.join("; ");
+    const hasAny = selected.length > 0;
+    civDisplay.textContent = hasAny ? joined : "Select countries…";
+    civDisplay.classList.toggle("placeholder", !hasAny);
+    civDisplay.title = hasAny ? joined : "";
+    civSummary.textContent = `(${selected.length} selected)`;
   }
   updateCitizenshipSummary();
 
-  // Selection change listeners
   civWrap.addEventListener("change", (e) => {
     if (e.target && e.target.name === "citizenship") updateCitizenshipSummary();
   });
-
-  // Simple search/filter
   civSearch.addEventListener("input", () => {
     const q = civSearch.value.trim().toLowerCase();
     for (const li of civWrap.querySelectorAll("li")) {
@@ -298,54 +274,31 @@ async function initDemographic() {
       li.style.display = label.includes(q) ? "" : "none";
     }
   });
-
-  // Close dropdown on "Done"
-  civClose.addEventListener("click", () => { civDetails.open = false; });
-
-  // --- existing logic for Q4 "Other" and Q6 skip ---
-  function syncEthnicityOther() {
-    const otherChecked = document.querySelector('input[name="q4_ethnicity"][value="Multiple ethnicity / Other"]')?.checked;
-    const otherInput = document.querySelector('input[name="q4_ethnicity_other"]');
-    if (otherInput) {
-      otherInput.style.display = otherChecked ? "block" : "none";
-      if (!otherChecked) otherInput.value = "";
-    }
+  if (!civDetails || !civClose || !civWrap || !civSummary || !civSearch) {
+    console.error("Citizenship dropdown elements missing", { civDetails, civClose, civWrap, civSummary, civSearch });
   }
-  function syncL2Block() {
-    const val = (document.querySelector('input[name="q6_english_first"]:checked') || {}).value;
-    const block = document.getElementById("l2-block");
-    const needL2 = (val === "No");
-    block.style.display = needL2 ? "block" : "none";
-    ["q7_native_language","q8_start_age","q9_years_studied","q10_years_in_us"].forEach(name => {
-      const el = document.querySelector(`[name="${name}"]`);
-      if (!el) return;
-      if (needL2) el.setAttribute("required", "required");
-      else { el.removeAttribute("required"); el.value = ""; }
-    });
-  }
-  syncEthnicityOther();
-  syncL2Block();
-  document.querySelectorAll('input[name="q4_ethnicity"]').forEach(el => el.addEventListener("change", syncEthnicityOther));
-  document.querySelectorAll('input[name="q6_english_first"]').forEach(el => el.addEventListener("change", syncL2Block));
+  civClose?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try { civDetails.open = false; } catch (_) {}
+    civDetails.removeAttribute("open");
+    const summary = civDetails.querySelector(".dropdown-summary");
+    summary?.focus({ preventScroll: true });
+  });
 
-  // --- submission ---
+  // submission
   const form = qs("#demo-form");
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-
     const fd = new FormData(form);
     const payload = Object.fromEntries(fd.entries());
-
-    // Multi-select citizenship from checkboxes
     payload.citizenship = Array.from(document.querySelectorAll('input[name="citizenship"]:checked')).map(i => i.value);
 
-    // Age validation
     const age = Number(payload.q1_age);
     if (!Number.isFinite(age) || age < 18) {
       alert("You must be at least 18 years old to participate.");
       return;
     }
-
     if (payload.q4_ethnicity !== "Multiple ethnicity / Other") {
       delete payload.q4_ethnicity_other;
     }
@@ -364,8 +317,44 @@ async function initDemographic() {
 
     const rnd = await api(`/api/randomize?session_id=${encodeURIComponent(getSession())}`, { method: "POST" });
     setAssignedPassages(rnd.passage_ids);
-    location.href = "passage.html?index=0";
+    markInAppNavigation();
+    location.href = "instructions.html?index=0";
   });
+}
+
+// instructions.html
+async function initRCInstructions() {
+  ensureSessionOrRedirect();
+
+  const idx = Number(param("index") || "0");
+  const assigned = getAssignedPassages();
+  if (!assigned || !assigned[idx]) { location.href = "demographic.html"; return; }
+
+  const pid = assigned[idx];
+  startFocusLogger({ page: "rc_instructions", passage_id: pid, passage_index: idx });
+
+  const agreeBtn  = document.getElementById("agree");
+  const startLink = document.getElementById("startLink");
+  const agreedKey = `rc_agree_${getSession()}`;
+  const nextHref  = `passage.html?index=${idx}`;
+
+  startLink.setAttribute("href", nextHref);
+
+  function showStart() {
+    if (agreeBtn)  agreeBtn.style.display = "none";
+    if (startLink) startLink.style.display = "inline-block";
+  }
+  if (localStorage.getItem(agreedKey) === "1") showStart();
+
+  if (agreeBtn) {
+    agreeBtn.addEventListener("click", () => {
+      localStorage.setItem(agreedKey, "1");
+      showStart();
+    }, { once: true });
+  }
+  if (startLink) {
+    startLink.addEventListener("click", () => { markInAppNavigation(); }, { once: true });
+  }
 }
 
 // passage.html
@@ -377,19 +366,14 @@ async function initPassage() {
   const pid = assigned?.[idx];
   if (!pid) { location.href = "consent.html"; return; }
 
-  // Start granular focus logging for this page (non-blocking)
-  startFocusLogger({ page: "passage", passage_id: pid });
+  startFocusLogger({ page: "passage", passage_id: pid, passage_index: idx, is_reread: (param("r")==="1") });
 
-  // visit counting
   const visits = getVisitCount(pid) + 1;
   setVisitCount(pid, visits);
 
-  // load passage
-  const t0 = performance.now();
   const data = await api(`/api/passage/${encodeURIComponent(pid)}?session_id=${encodeURIComponent(getSession())}`);
-  qs("#title").textContent = data.title;
+  qs("#title").textContent = `Passage ${passageOrdinal(idx)}`;
 
-  // paragraph rendering
   const wrap = qs("#text");
   if (wrap) {
     wrap.innerHTML = "";
@@ -406,91 +390,56 @@ async function initPassage() {
     }
   }
 
-  // compute target question (resume current if present)
+  const isReread = (param("r") === "1");
   const currentQ = getCurrentQ(pid);
-  const hasCurrent = (currentQ !== null && !Number.isNaN(currentQ));
-  const targetQ = hasCurrent ? currentQ : 0;
-  const nextHref = `questions.html?index=${idx}&q=${targetQ}`;
+  const hasCurrent = Number.isInteger(currentQ) && currentQ >= 0;
+  const targetQForNext = (isReread && hasCurrent) ? currentQ : 0;
+  const nextHref = `questions.html?index=${idx}&q=${targetQForNext}`;
 
-  // Preferred: anchor link with href so navigation is native & non-blocking
   const nextLink = document.getElementById("nextLink");
   if (nextLink) {
     nextLink.setAttribute("href", nextHref);
-    nextLink.addEventListener("click", () => {
-      const t1 = performance.now();
-      // fire-and-forget; never block navigation
-      beaconEvent("passage_view_complete", {
-        passage_id: pid,
-        visit_ms: Math.round(t1 - t0),
-        visit_index: visits
-      });
-    }, { once: true });
+    nextLink.addEventListener("click", () => { markInAppNavigation(); }, { once: true });
   }
-
-  // Fallback: support a button with id="next" if your HTML still uses it
   const nextBtn = document.getElementById("next");
   if (!nextLink && nextBtn) {
     nextBtn.setAttribute("type", "button");
-    nextBtn.addEventListener("click", () => {
-      const t1 = performance.now();
-      beaconEvent("passage_view_complete", {
-        passage_id: pid,
-        visit_ms: Math.round(t1 - t0),
-        visit_index: visits
-      });
-      location.href = nextHref; // direct navigation
-    }, { once: true });
+    nextBtn.addEventListener("click", () => { markInAppNavigation(); location.href = nextHref; }, { once: true });
   }
 
-  // Back to Current Question button
   const backToQ = document.getElementById("backToQuestion");
   if (backToQ) {
-    if (hasCurrent) {
+    if (isReread && hasCurrent) {
       backToQ.style.display = "";
-      backToQ.addEventListener("click", () => { location.href = nextHref; });
+      backToQ.addEventListener("click", () => { markInAppNavigation(); location.href = nextHref; });
     } else {
       backToQ.style.display = "none";
     }
   }
 }
 
-
-
+// questions.html
 async function initQuestions() {
   ensureSessionOrRedirect();
 
-  const idx = Number(param("index") || "0");            // passage index (0 or 1)
-  const qidx = Math.max(0, Number(param("q") || "0"));  // question index within passage
+  const idx = Number(param("index") || "0");
+  const qidx = Math.max(0, Number(param("q") || "0"));
   const assigned = getAssignedPassages();
   const pid = assigned[idx];
   if (!pid) { location.href = "consent.html"; return; }
 
-  // Start page focus logging early (we'll fill question_id after fetch)
-  startFocusLogger({ page: "questions", passage_id: pid, q_index: qidx });
-
-  // Keys for per-passage state
-  const answersKey = `answers_${pid}`;
-  const timeKey = `qtime_${pid}`; // total per-passage (kept if you use it)
-
-  // Start per-page timer
-  const pageStart = performance.now();
-
-  // Fetch questions for this passage
+  // Fetch questions FIRST so we can include required meta in attention logs
   const payload = await api(`/api/questions/${encodeURIComponent(pid)}?session_id=${encodeURIComponent(getSession())}`);
   const total = payload.questions.length;
   const q = payload.questions[qidx];
+  if (!q) { location.href = `questions.html?index=${idx}&q=0`; return; }
 
-  // If q index out of range, normalize
-  if (!q) {
-    location.href = `questions.html?index=${idx}&q=0`;
-    return;
-  }
+  // Now start attention logger (mandatory RC meta present)
+  startFocusLogger({ page: "questions", passage_id: pid, passage_index: idx, question_id: q.id, question_index: qidx });
 
-  // Update focus logger with question_id (optional refinement)
-  // (This sends a small "context" event; purely optional)
-  sendEvent("context_update", { page: "questions", passage_id: pid, q_index: qidx, question_id: q.id });
+  const pageStart = performance.now();
 
-  // Render the single question
+  // Render single question
   const container = qs("#qwrap");
   container.innerHTML = "";
   const card = document.createElement("div"); card.className = "qcard";
@@ -509,7 +458,7 @@ async function initQuestions() {
   `;
   container.appendChild(card);
 
-  // Keep track of "current question" for quick return from passage page
+  // Track current question for quick return
   setCurrentQ(pid, qidx);
 
   // Pre-select saved answer if any
@@ -530,17 +479,14 @@ async function initQuestions() {
     }
   });
 
-  // Progress label
   qs("#progress").textContent = `Q${qidx + 1} of ${total}`;
 
-  // Back to passage (log + go)
-  qs("#backToPassage").addEventListener("click", async () => {
-    // count a back click (optional existing behavior)
+  // Back to passage (no logging; only navigation)
+  qs("#backToPassage").addEventListener("click", () => {
     const clicks = getBackClicks(pid) + 1;
     setBackClicks(pid, clicks);
-    sendEvent("navigate_back_to_passage", { passage_id: pid, count: clicks, q_index: qidx, question_id: q.id });
-
-    location.href = `passage.html?index=${idx}`;
+    markInAppNavigation();
+    location.href = `passage.html?index=${idx}&r=1`;
   });
 
   // Prev / Next / Submit controls
@@ -558,21 +504,19 @@ async function initQuestions() {
   }
 
   prevBtn.addEventListener("click", () => {
+    markInAppNavigation();
     location.href = `questions.html?index=${idx}&q=${qidx - 1}`;
   });
-
   nextBtn.addEventListener("click", () => {
+    markInAppNavigation();
     location.href = `questions.html?index=${idx}&q=${qidx + 1}`;
   });
 
   submitBtn.addEventListener("click", async () => {
-    // Build full answers dict
     const answers = {};
-    payload.questions.forEach(qq => {
-      answers[qq.id] = savedAll[qq.id] ?? null;
-    });
+    payload.questions.forEach(qq => { answers[qq.id] = savedAll[qq.id] ?? null; });
 
-    // (Optional) total time-on-questions per passage
+    const timeKey = `qtime_${pid}`;
     const totalPrev = Number(localStorage.getItem(timeKey) || 0);
     const totalNow = totalPrev + Math.round(performance.now() - pageStart);
     localStorage.setItem(timeKey, String(totalNow));
@@ -589,14 +533,13 @@ async function initQuestions() {
     });
 
     localStorage.setItem(`mcq_result_${pid}`, JSON.stringify(res));
-    // Clear markers for this passage
     localStorage.removeItem(timeKey);
     clearCurrentQ(pid);
 
+    markInAppNavigation();
     location.href = `posttask.html?index=${idx}`;
   });
 }
-
 
 // posttask.html
 async function initPostTask() {
@@ -606,20 +549,17 @@ async function initPostTask() {
   const pid = assigned[idx];
   if (!pid) { location.href = "consent.html"; return; }
 
+  startFocusLogger({ page: "posttask", passage_id: pid, passage_index: idx });
+
   const data = await api(`/api/posttask_data/${encodeURIComponent(pid)}?session_id=${encodeURIComponent(getSession())}`);
+  qs("#passageTitle").textContent = `Passage ${passageOrdinal(idx)}`;
 
-  qs("#passageTitle").textContent = data.passage.title;
-
-  // build paragraphs from data.passage.text
   const wrap = qs("#passageText");
   wrap.innerHTML = "";
-
   const raw = (data.passage.text || "").replace(/\r\n/g, "\n").trim();
-  const paragraphs = raw.split(/\n\s*\n+/); // split on blank lines
-
+  const paragraphs = raw.split(/\n\s*\n+/);
   for (const para of paragraphs) {
     const p = document.createElement("p");
-    // keep single line breaks inside paragraph
     const lines = para.split("\n");
     lines.forEach((line, i) => {
       p.appendChild(document.createTextNode(line));
@@ -630,23 +570,17 @@ async function initPostTask() {
 
   const right = qs("#review");
   right.innerHTML = "";
-
   data.questions.forEach(q => {
     const row = document.createElement("div");
     row.className = "card";
-
     const icon = q.is_correct ? "✅" : "❌";
-
-    // Build full option list with markers for correct and user's choice
     const listHTML = q.choices.map(c => {
       const isUser = c.id === q.user_choice_id;
       const isCorrect = c.id === q.correct_choice_id;
-
       const badges = [
         isCorrect ? '<span class="badge-sm ok">Correct</span>' : '',
         isUser ? '<span class="badge-sm">Your choice</span>' : ''
       ].join(' ');
-
       return `
         <li class="${isCorrect ? 'correct' : ''} ${isUser ? 'selected' : ''}">
           <div class="choice-line">
@@ -654,7 +588,6 @@ async function initPostTask() {
           </div>
         </li>`;
     }).join("");
-
     row.innerHTML = `
       <div class="badge">${icon} ${q.is_correct ? "Correct" : "Incorrect"}</div>
       <h3>${q.prompt}</h3>
@@ -666,7 +599,6 @@ async function initPostTask() {
         <span class="thumb" data-q="${q.question_id}" data-v="-1">👎</span>
       </div>
     `;
-
     right.appendChild(row);
   });
 
@@ -682,25 +614,19 @@ async function initPostTask() {
   qs("#continue").addEventListener("click", async () => {
     await api("/api/posttask", {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({
-        session_id: getSession(),
-        passage_id: pid,
-        ratings
-      })
+      body: JSON.stringify({ session_id: getSession(), passage_id: pid, ratings })
     });
-
     const nextIdx = idx + 1;
-    if (nextIdx < assigned.length) {
-      location.href = `passage.html?index=${nextIdx}`;
-    } else {
-      location.href = "vocab.html";
-    }
+    markInAppNavigation();
+    if (nextIdx < assigned.length) location.href = `passage.html?index=${nextIdx}`;
+    else location.href = "vocab.html";
   });
 }
 
 // vocab.html
 async function initVocab() {
   ensureSessionOrRedirect();
+  startFocusLogger({ page: "vocab" });
 
   let current = null;
   let lastShownAt = null;
@@ -708,11 +634,11 @@ async function initVocab() {
   async function ensureStarted() {
     await api(`/api/vocab/start?session_id=${encodeURIComponent(getSession())}`, { method:"POST" });
   }
-
   async function loadNext() {
     const r = await api(`/api/vocab/next?session_id=${encodeURIComponent(getSession())}`);
     if (r.done) {
-      location.href = "thanks.html";
+      markInAppNavigation();
+      location.href = "final_check.html";
       return;
     }
     current = r.item;
@@ -720,7 +646,6 @@ async function initVocab() {
     qs("#token").textContent = current.token;
     lastShownAt = performance.now();
   }
-
   qs("#yes").addEventListener("click", () => submit(true));
   qs("#no").addEventListener("click", () => submit(false));
 
@@ -742,16 +667,80 @@ async function initVocab() {
   await loadNext();
 }
 
-// simple router by data-page attribute
-document.addEventListener("DOMContentLoaded", () => {
-  const page = document.body.dataset.page;
+// final_check.html
+async function initFinalCheck() {
+  ensureSessionOrRedirect();
+  startFocusLogger({ page: "final_check" });
+
+  const form = document.getElementById("final-form");
+  const toolsBlock = document.getElementById("tools-block");
+  const otherBox = document.getElementById("toolOther");
+  const otherText = document.getElementById("toolOtherText");
+
+  function syncToolsBlock() {
+    const used = (document.querySelector('input[name="used_ai_tools"]:checked') || {}).value;
+    const show = (used === "Yes");
+    toolsBlock.style.display = show ? "block" : "none";
+    if (!show) {
+      document.querySelectorAll('input[name="tool"]').forEach(cb => cb.checked = false);
+      otherText.value = "";
+      otherText.style.display = "none";
+    }
+  }
+  document.querySelectorAll('input[name="used_ai_tools"]').forEach(el => el.addEventListener("change", syncToolsBlock));
+  syncToolsBlock();
+
+  if (otherBox) {
+    otherBox.addEventListener("change", () => {
+      otherText.style.display = otherBox.checked ? "block" : "none";
+      if (!otherBox.checked) otherText.value = "";
+    });
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const used = (document.querySelector('input[name="used_ai_tools"]:checked') || {}).value || null;
+    const tools = Array.from(document.querySelectorAll('input[name="tool"]:checked')).map(cb => cb.value);
+    const other = (tools.includes("Other") ? (otherText.value || "").trim() : "");
+
+    if (used === "Yes") {
+      const hasAny = tools.length > 0 || other.length > 0;
+      if (!hasAny) { alert("Please select at least one tool you used or specify it in 'Other'."); return; }
+    }
+
+    const payload = { used_ai_tools: used, tools, other_tool: other };
+    await api(`/api/final_check?session_id=${encodeURIComponent(getSession())}`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+
+    markInAppNavigation();
+    location.href = "thanks.html";
+  });
+}
+
+// --- Router (runs even if JS loads after DOMContentLoaded) ---
+function bootstrap() {
+  const page = document.body?.dataset?.page;
   const map = {
     "consent": initConsent,
     "demographic": initDemographic,
+    "rc_instructions": initRCInstructions,
     "passage": initPassage,
     "questions": initQuestions,
     "posttask": initPostTask,
-    "vocab": initVocab
+    "vocab": initVocab,
+    "final_check": initFinalCheck,
   };
-  if (map[page]) map[page]();
-});
+  if (page && map[page]) {
+    try { map[page](); } catch (err) { console.error("[bootstrap] init error:", err); }
+  } else {
+    console.warn("[bootstrap] no init for page:", page);
+  }
+}
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", bootstrap, { once: true });
+} else {
+  bootstrap();
+}

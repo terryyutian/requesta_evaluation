@@ -149,9 +149,19 @@ ul.choices li { margin: 8px 0; padding: 10px 12px; border: 1px solid #243145; bo
   align-items: center;
   justify-content: space-between;
   list-style: none;
+  gap: 8px;
   cursor: pointer;
 }
 .dropdown-summary::-webkit-details-marker { display: none; }
+.dropdown-summary:focus { outline: 2px solid var(--ring); outline-offset: 2px; }
+.dropdown-display {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;  /* long lists collapse nicely */
+}
+
+.dropdown-display.placeholder { color: var(--muted); }
 
 .muted { color: var(--muted); font-size: 0.9em; }
 
@@ -189,3 +199,11 @@ a.btn:hover { filter: brightness(1.1); }
 /* Keep icon-left alignment for each option */
 ul.options li { margin: 6px 0; }
 ul.options li label.option-row { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Reuse your color tokens */
+button.danger {
+  background: var(--danger);   /* #ef4444 */
+  color: #3b0d0d;              /* dark red text for contrast */
+}
+button.danger:hover { filter: brightness(1.1); }
+button.danger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }

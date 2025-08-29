@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Final Check</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-page="final_check">
+  <div class="container">
+    <div class="card">
+      <h1>Final Check</h1>
+
+      <form id="final-form">
+
+        <fieldset>
+          <legend><strong>While completing this survey, did you use any AI tools (e.g., ChatGPT, Gemini) or web search engines (e.g., Google, Bing) to generate or look up answers to any of the reading comprehension questions?</strong></legend>
+          <p class="badge"> <strong>Note: Your payment will not be reduced or withheld based on your answer to this question; we are only interested in accurate reporting.</strongs></p>
+          <ul class="options">
+            <li><label class="option-row"><input type="radio" name="used_ai_tools" value="No" required><span>No</span></label></li>
+            <li><label class="option-row"><input type="radio" name="used_ai_tools" value="Yes"><span>Yes</span></label></li>
+            <li><label class="option-row"><input type="radio" name="used_ai_tools" value="Prefer not to say"><span>Prefer not to say</span></label></li>
+          </ul>
+        </fieldset>
+
+        <fieldset id="tools-block" style="display:none;">
+          <legend><strong>If yes, which tools did you use?</strong> <em>(Select all that apply)</em></legend>
+          <ul class="options">
+            <li><label class="option-row"><input type="checkbox" name="tool" value="Google"><span>Google</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="tool" value="Bing"><span>Bing</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="tool" value="ChatGPT"><span>ChatGPT</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="tool" value="Gemini"><span>Gemini</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="tool" value="Perplexity"><span>Perplexity</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="tool" value="Grok"><span>Grok</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="tool" value="Claude"><span>Claude</span></label></li>
+            <li>
+              <label class="option-row"><input type="checkbox" id="toolOther" name="tool" value="Other"><span>Other (specify)</span></label>
+              <input id="toolOtherText" placeholder="Type other tool..." style="margin-top:8px; display:none;" />
+            </li>
+          </ul>
+        </fieldset>
+
+        <div class="right">
+          <button type="submit">Continue →</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -190,24 +190,17 @@ def vocab_answer(payload: VocabAnswerPayload):
 EVENT_LOG: Dict[str, list] = defaultdict(list)
 SESSION_EVENT_SEQ: Dict[str, int] = defaultdict(int)
 
+@app.post("/api/final_check")
+def submit_final_check(payload: Dict[str, Any] = Body(...), session_id: str = ""):
+    if not session_id or session_id not in storage.SESSIONS:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    storage.final_check(session_id, payload)
+    return {"ok": True}
+
 @app.post("/api/event")
-def api_event(evt: Dict[str, Any]):
-  session_id = evt.get("session_id")
-  if not session_id:
-    raise HTTPException(status_code=400, detail="Missing session_id")
-
-  client_seq = int(evt.get("seq") or 0)
-  last = SESSION_EVENT_SEQ[session_id]
-  # finalize a strictly increasing sequence
-  seq_final = max(last + 1, client_seq)
-  SESSION_EVENT_SEQ[session_id] = seq_final
-
-  record = {
-    "seq": seq_final,                              # <- final total order index
-    "event_type": evt.get("event_type"),
-    "meta": evt.get("meta") or {},
-    "client_ts": int(evt.get("client_ts") or 0),   # client-side timestamp (ms)
-    "server_ts": int(time.time() * 1000),          # server receipt time (ms)
-  }
-  EVENT_LOG[session_id].append(record)
-  return {"ok": True, "seq": seq_final}
+def api_event(evt: Dict[str, Any] = Body(...)):
+  try:
+    rec = storage.log_event(evt)
+  except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e))
+  return {"ok": True, "seq": rec["seq"]}

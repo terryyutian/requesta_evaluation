@@ -40,11 +40,10 @@
         <legend><strong>Q3:</strong> What is your country (or countries) of citizenship? <em>(Select all that apply)</em></legend>
 
         <details id="citizenshipDropdown" class="dropdown">
-          <summary class="dropdown-summary">
-            <span>Select countries…</span>
+          <summary class="dropdown-summary" tabindex="0">
+            <span id="citizenshipDisplay" class="dropdown-display placeholder">Select countries…</span>
             <span id="citizenshipSummary" class="muted">(0 selected)</span>
           </summary>
-
           <div class="dropdown-panel">
             <input type="text" id="citizenshipSearch" placeholder="Search countries…" />
             <ul id="citizenshipOptions" class="options scroll"></ul>
@@ -133,7 +132,7 @@
         
         <!-- Q12 -->
         <fieldset>
-          <legend><strong>Q12:</strong> Hours per week you read material not required by instructors</legend>
+          <legend><strong>Q12:</strong> Hours per week you read </legend>
           <ul class="options">
             <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="None" required><span>None</span></label></li>
             <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="Less than 1 hour"><span>Less than 1 hour</span></label></li>

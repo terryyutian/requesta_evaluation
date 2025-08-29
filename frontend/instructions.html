@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Reading Comprehension Task Instructions</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-page="rc_instructions">
+  <div class="container">
+    <div class="card">
+      <h1>Reading Comprehension Task</h1>
+      <p>You will read two passages (about 400–450 words each) and answer five questions about each passage. Please follow these instructions:</p>
+      <ol style="margin-top:8px;">
+        <li>The passage and its questions appear on separate screens. Read the entire passage first before proceeding to the questions.</li>
+        <li>Do not use AI tools, search engines, notes, or other external resources while completing the task.</li>
+        <li>Stay focused and avoid unrelated activities until you finish.</li>
+      </ol>
+
+      <div class="right" style="margin-top:16px;">
+        <!-- shows first -->
+        <button id="agree" type="button">I Agree</button>
+        <!-- appears after user agrees; pre-wired href so navigation is native -->
+        <a id="startLink" class="btn" style="display:none;">Start the Reading Comprehension Task →</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
