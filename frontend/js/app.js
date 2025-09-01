@@ -461,6 +461,7 @@ async function initPassage() {
     }
   }
 
+  // Build target for next step
   const isReread = (param("r") === "1");
   const currentQ = getCurrentQ(pid);
   const hasCurrent = Number.isInteger(currentQ) && currentQ >= 0;
@@ -468,23 +469,24 @@ async function initPassage() {
   const nextHref = `questions.html?index=${idx}&q=${targetQForNext}`;
 
   const nextLink = document.getElementById("nextLink");
-  if (nextLink) {
-    nextLink.setAttribute("href", nextHref);
-    nextLink.addEventListener("click", () => { markInAppNavigation(); }, { once: true });
-  }
-  const nextBtn = document.getElementById("next");
-  if (!nextLink && nextBtn) {
-    nextBtn.setAttribute("type", "button");
-    nextBtn.addEventListener("click", () => { markInAppNavigation(); location.href = nextHref; }, { once: true });
-  }
+  const backToQ  = document.getElementById("backToQuestion");
 
-  const backToQ = document.getElementById("backToQuestion");
-  if (backToQ) {
-    if (isReread && hasCurrent) {
+  if (isReread && hasCurrent) {
+    // Show only the "Back to Current Question →" button
+    if (nextLink) nextLink.style.display = "none";
+    if (backToQ) {
+      backToQ.textContent = "Back to Current Question →";
       backToQ.style.display = "";
-      backToQ.addEventListener("click", () => { markInAppNavigation(); location.href = nextHref; });
-    } else {
-      backToQ.style.display = "none";
+      backToQ.onclick = () => { location.href = nextHref; };
+    }
+  } else {
+    // Regular first-time flow: show only the Next link
+    if (backToQ) backToQ.style.display = "none";
+    if (nextLink) {
+      nextLink.style.display = "inline-block";
+      nextLink.setAttribute("href", nextHref);
+      // (Optional) prevent double-activations:
+      nextLink.onclick = null;
     }
   }
 }
