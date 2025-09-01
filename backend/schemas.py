@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
 class SessionStartRequest(BaseModel):
@@ -61,11 +61,6 @@ class PostTaskFeedbackPayload(BaseModel):
     passage_id: str
     ratings: Dict[str, int]  # {question_id: +1/-1}
 
-class EventLogPayload(BaseModel):
-    session_id: str
-    event_type: str
-    meta: Dict[str, Any] = Field(default_factory=dict)
-
 class VocabItem(BaseModel):
     id: str
     token: str
@@ -80,3 +75,28 @@ class VocabAnswerPayload(BaseModel):
     item_id: str
     is_word: bool
     rt_ms: Optional[int] = None
+
+
+class ParticipationEndRequest(BaseModel):
+    session_id: str
+    finished_at_ms: Optional[int] = None  # optional; server will use now() if missing
+
+BucketName = Literal[
+    "consent","demographic","reading_instruction",
+    "reading_task1","survey_task1",
+    "reading_task2","survey_task2",
+    "vocabulary"
+]
+
+class AttentionLogPayload(BaseModel):
+    session_id: str
+    bucket: BucketName
+    elapsed_ms: int  # focused time delta to add
+
+class RCEventPayload(BaseModel):
+    session_id: str
+    passage_id: str
+    page_name: str    # e.g., "p1", "p1q3"; use "unknown" for blur events
+    status: Literal["active","blur"]
+    start_time: int   # client ms epoch (Date.now())
+    duration_ms: int  # duration of this segment

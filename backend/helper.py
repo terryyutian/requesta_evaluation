@@ -2,57 +2,73 @@
 from typing import List, Dict, Any, Optional
 
 
-# put this anywhere in main.py (above the endpoint), or into a small utils module
 def normalize_demographics(raw: Dict[str, Any]) -> Dict[str, Any]:
     used: set[str] = set()
     out: Dict[str, Any] = {}
 
-    # Prolific ID (already matching the schema)
+    # Prolific ID
     out["prolific_id"] = raw.get("prolific_id"); used.add("prolific_id")
 
     # Age
-    if "q1_age" in raw:
+    def _maybe_int(x):
         try:
-            out["age"] = int(raw["q1_age"]) if str(raw["q1_age"]).strip() != "" else None
+            s = str(x).strip()
+            return int(s) if s != "" else None
         except Exception:
-            out["age"] = None
-        used.add("q1_age")
+            return None
+    out["age"] = _maybe_int(raw.get("q1_age")); used.add("q1_age")
 
     # Gender
     out["gender"] = raw.get("q2_gender"); used.add("q2_gender")
 
     # Citizenship (list[str])
-    if "citizenship" in raw:
-        if isinstance(raw["citizenship"], list):
-            out["citizenship"] = raw["citizenship"]
-        elif raw["citizenship"] is None:
-            out["citizenship"] = None
-        else:
-            out["citizenship"] = [raw["citizenship"]]
-        used.add("citizenship")
+    c = raw.get("citizenship")
+    if isinstance(c, list):
+        out["citizenship"] = c
+    elif c in (None, ""):
+        out["citizenship"] = []
+    else:
+        out["citizenship"] = [c]
+    used.add("citizenship")
 
     # Ethnicity (merge "Other" text)
     eth = raw.get("q4_ethnicity")
-    if eth == "Multiple ethnicity / Other":
-        eth = raw.get("q4_ethnicity_other") or eth
-    out["ethnicity"] = eth
+    other = (raw.get("q4_ethnicity_other") or "").strip()
+    out["ethnicity"] = other if eth == "Multiple ethnicity / Other" and other else eth
     used.update({"q4_ethnicity", "q4_ethnicity_other"})
 
     # Education
     out["education"] = raw.get("q5_education"); used.add("q5_education")
 
-    # First language
-    q6 = raw.get("q6_english_first")
-    if q6 == "Yes":
+    # First language + L2 details
+    q6 = (raw.get("q6_english_first") or "").strip().lower()
+    used.add("q6_english_first")
+
+    def _maybe_float(x):
+        try:
+            s = str(x).strip()
+            return float(s) if s != "" else None
+        except Exception:
+            return None
+
+    if q6 == "yes":
         out["first_language"] = "English"
-    elif q6 == "No":
-        out["first_language"] = raw.get("q7_native_language")
+        # Explicitly mark L2 fields as used so they don't end up in extras
+        used.update({"q7_native_language","q8_start_age","q9_years_studied","q10_years_in_us"})
+    elif q6 == "no":
+        out["first_language"] = (raw.get("q7_native_language") or "").strip() or None
+        used.add("q7_native_language")
+        out["l2"] = {
+            "start_age": _maybe_float(raw.get("q8_start_age")),
+            "years_studied": _maybe_float(raw.get("q9_years_studied")),
+            "years_in_us": _maybe_float(raw.get("q10_years_in_us")),
+        }
+        used.update({"q8_start_age","q9_years_studied","q10_years_in_us"})
     else:
         out["first_language"] = None
-    used.update({"q6_english_first", "q7_native_language"})
+        # If neither yes/no, don't keep stray L2 values in extras
+        used.update({"q7_native_language","q8_start_age","q9_years_studied","q10_years_in_us"})
 
-    # Everything else → extras
-    extras = {k: v for k, v in raw.items() if k not in used}
-    out["extras"] = extras
-
+    # Everything else → extras (but not L2 when not applicable)
+    out["extras"] = {k: v for k, v in raw.items() if k not in used}
     return out

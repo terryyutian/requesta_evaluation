@@ -4,18 +4,18 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import math
 import time
-from collections import defaultdict
 
 from schemas import (
     SessionStartRequest, SessionStartResponse, DemographicsPayload, RandomizeResponse,
     Passage, QuestionsResponse, SubmitMCQPayload, MCQSubmitResult, PostTaskFeedbackPayload,
-    EventLogPayload, VocabNextResponse, VocabItem, VocabAnswerPayload
+   VocabNextResponse, VocabItem, VocabAnswerPayload
 )
 from security import new_session_id
 from randomizer import random_two_passages, maybe_shuffle_choices
 from data import PASSAGES, QUESTIONS, VOCAB
 from helper import normalize_demographics
 import storage
+from schemas import AttentionLogPayload, RCEventPayload, ParticipationEndRequest
 
 app = FastAPI(title="Study Data Collection API", version="0.1.0")
 
@@ -185,10 +185,6 @@ def vocab_answer(payload: VocabAnswerPayload):
     storage.advance_vocab(payload.session_id, payload.item_id, payload.is_word, payload.rt_ms)
     return {"ok": True}
 
-# --- Event logging (copy attempts, focus/blur, rereads, durations, etc.) ---
-# In-memory logs & per-session counters (swap to DB later)
-EVENT_LOG: Dict[str, list] = defaultdict(list)
-SESSION_EVENT_SEQ: Dict[str, int] = defaultdict(int)
 
 @app.post("/api/final_check")
 def submit_final_check(payload: Dict[str, Any] = Body(...), session_id: str = ""):
@@ -197,10 +193,51 @@ def submit_final_check(payload: Dict[str, Any] = Body(...), session_id: str = ""
     storage.final_check(session_id, payload)
     return {"ok": True}
 
-@app.post("/api/event")
-def api_event(evt: Dict[str, Any] = Body(...)):
-  try:
-    rec = storage.log_event(evt)
-  except ValueError as e:
-    raise HTTPException(status_code=400, detail=str(e))
-  return {"ok": True, "seq": rec["seq"]}
+@app.post("/api/log/participation_end")
+def log_participation_end(payload: ParticipationEndRequest):
+    if payload.session_id not in storage.SESSIONS:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    try:
+        res = storage.log_total_participation_time(payload.session_id, payload.finished_at_ms)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return res
+
+@app.post("/api/log/attention")
+def log_attention(payload: AttentionLogPayload):
+    if payload.session_id not in storage.SESSIONS:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    try:
+        res = storage.log_total_task_time(payload.session_id, payload.bucket, payload.elapsed_ms)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return res
+
+
+@app.post("/api/log/rc_event")
+def log_rc_event(payload: RCEventPayload):
+    # Validate session
+    if payload.session_id not in storage.SESSIONS:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    # Persist the RC event (no event_seq)
+    try:
+        rec = storage.log_reading_comprehension_details(
+            payload.session_id,
+            {
+                "start_time": payload.start_time,
+                "status": payload.status,
+                "passage_id": payload.passage_id,
+                "page_name": payload.page_name or "unknown",
+                "duration_ms": payload.duration_ms or 0,
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Return a simple ACK (optionally echo back timestamps for debugging)
+    return {
+        "ok": True,
+        "start_time": rec["start_time"],
+        "server_ts": rec["server_ts"],
+    }

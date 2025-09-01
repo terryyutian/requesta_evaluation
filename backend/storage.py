@@ -5,10 +5,13 @@ By default uses in-memory dicts. You can swap these out for SQLite/CSV/S3, etc.
 """
 
 from __future__ import annotations
-from typing import Dict, Any, List, DefaultDict, Tuple
+from typing import Dict, Any, List, Optional, DefaultDict  
 from collections import defaultdict
 import time
-import threading
+import threading  
+
+def _now_ms() -> int:  # add this helper
+    return int(time.time() * 1000)
 
 # --- In-memory stores (replace with DB as needed) ---
 SESSIONS: Dict[str, Dict[str, Any]] = {}  # session_id -> info
@@ -17,12 +20,6 @@ ASSIGNMENTS: Dict[str, List[str]] = {}    # session_id -> [pid1, pid2]
 MCQ_RESPONSES: Dict[str, Dict[str, Any]] = defaultdict(dict)  # session_id -> passage_id -> details
 POSTTASK: Dict[str, Dict[str, int]] = defaultdict(dict)       # session_id -> {question_id: +1/-1}
 VOCAB_PROGRESS: Dict[str, Dict[str, Any]] = defaultdict(dict) # session_id -> {index, answers}
-# Per-session log and sequence counter
-EVENT_LOG: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
-SESSION_EVENT_SEQ: DefaultDict[str, int] = defaultdict(int)
-
-# Track last ACTIVE by (session_id, page_instance_id)
-LAST_ACTIVE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
 
 
@@ -59,93 +56,9 @@ def advance_vocab(session_id: str, item_id: str, is_word: bool, rt_ms: int | Non
     prog["index"] += 1
 
 def get_vocab_progress(session_id: str) -> Dict[str, Any]:
-    print(f"Vocab progress for {session_id}: {VOCAB_PROGRESS.get(session_id)}")
+    #print(f"Vocab progress for {session_id}: {VOCAB_PROGRESS.get(session_id)}")
     return VOCAB_PROGRESS.get(session_id, {"index": 0, "answers": [], "size": 0})
     #TODO: Save to a DB
-
-
-_lock = threading.Lock()
-
-def _now_ms() -> int:
-  return int(time.time() * 1000)
-
-def log_event(evt: Dict[str, Any]) -> Dict[str, Any]:
-  """
-  Expects payload from client with:
-    session_id, seq (optional), event_type ('active'|'blur'),
-    page_name, start_time (client ms), page_instance_id, meta
-  Returns stored record with finalized seq and server_ts.
-  When event_type == 'blur', computes duration_ms for the preceding 'active'
-  with the same (session_id, page_instance_id).
-  """
-  session_id = str(evt.get("session_id") or "")
-  if not session_id:
-    raise ValueError("session_id required")
-
-  event_type = str(evt.get("event_type") or "")
-  if event_type not in ("active", "blur"):
-    raise ValueError("event_type must be 'active' or 'blur'")
-
-  page_name = str(evt.get("page_name") or "unknown")
-  page_instance_id = str(evt.get("page_instance_id") or "")
-  if not page_instance_id:
-    raise ValueError("page_instance_id required")
-
-  start_time = int(evt.get("start_time") or 0)
-
-  meta = evt.get("meta") or {}
-  # Enforce RC requirements
-  if page_name in ("passage", "questions"):
-    if "passage_index" not in meta or "passage_id" not in meta:
-      raise ValueError("RC pages require meta.passage_index and meta.passage_id")
-    if page_name == "questions":
-      if "question_index" not in meta or "question_id" not in meta:
-        raise ValueError("questions page requires meta.question_index and meta.question_id")
-
-  client_seq = int(evt.get("seq") or 0)
-  with _lock:
-    last = SESSION_EVENT_SEQ[session_id]
-    seq_final = max(last + 1, client_seq)
-    SESSION_EVENT_SEQ[session_id] = seq_final
-
-  record: Dict[str, Any] = {
-    "session_id": session_id,
-    "seq": seq_final,
-    "event_type": event_type,
-    "page_name": page_name,
-    "meta": meta,
-    "start_time": start_time,
-    "server_ts": _now_ms(),
-    "page_instance_id": page_instance_id,
-  }
-
-  # Compute duration on blur based on matching ACTIVE
-  if event_type == "blur":
-    key = (session_id, page_instance_id)
-    prev = LAST_ACTIVE.get(key)
-    if prev:
-      # prefer client clocks; fall back to server if needed
-      start = int(prev.get("start_time") or 0)
-      end = start_time if start_time else record["server_ts"]
-      start = start if start else int(prev.get("server_ts") or record["server_ts"])
-      duration = max(0, int(end) - int(start))
-      record["duration_ms"] = duration
-      # this active is now closed
-      LAST_ACTIVE.pop(key, None)
-    else:
-      # no matching active found; still store the event
-      record["duration_ms"] = None
-
-  elif event_type == "active":
-    # overwrite/replace last active for this page instance
-    key = (session_id, page_instance_id)
-    LAST_ACTIVE[key] = record
-
-  EVENT_LOG[session_id].append(record)
-  return record
-
-def get_events(session_id: str) -> List[Dict[str, Any]]:
-  return list(EVENT_LOG.get(session_id, []))
 
 
 def final_check(session_id: str, data: Dict[str, Any]) -> None:
@@ -167,3 +80,144 @@ def final_check(session_id: str, data: Dict[str, Any]) -> None:
     sess = SESSIONS.setdefault(session_id, {})
     sess["final_check"] = rec
 
+
+# --- logging ---
+# --- add below existing globals ---
+
+# Per-session attention buckets
+TASK_TIME: DefaultDict[str, Dict[str, int]] = defaultdict(lambda: {
+    "consent":0, "demographic":0, "reading_instruction":0,
+    "reading_task1":0, "survey_task1":0,
+    "reading_task2":0, "survey_task2":0,
+    "vocabulary":0
+})
+
+# RC detailed events + per-session event sequence
+RC_EVENTS: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+
+def log_total_participation_time(session_id: str, finished_at_ms: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Compute and persist total participation time (ms) from session created_at.
+    """
+    sess = SESSIONS.get(session_id)
+    if not sess:
+        raise ValueError("Session not found.")
+    start_s = float(sess.get("created_at") or 0.0)
+    if start_s <= 0:
+        raise ValueError("Missing session start.")
+    end_ms = int(finished_at_ms) if finished_at_ms else _now_ms()
+    total_ms = max(0, end_ms - int(start_s * 1000))
+    sess["participation_end_ms"] = end_ms
+    sess["total_participation_ms"] = total_ms
+    print(f"Session {session_id} total participation time: {total_ms} ms")
+    return {"session_id": session_id, "total_participation_ms": total_ms}
+
+
+def log_total_task_time(session_id: str, bucket: str, elapsed_ms: int) -> Dict[str, Any]:
+    """
+    Add focused elapsed_ms to one bucket for this session.
+    """
+    if session_id not in SESSIONS:
+        raise ValueError("Session not found.")
+    if bucket not in TASK_TIME[session_id]:
+        # ignore unknown bucket names silently (keeps it robust)
+        return {"session_id": session_id, "ignored_bucket": bucket}
+    elapsed_ms = max(0, int(elapsed_ms))
+    TASK_TIME[session_id][bucket] += elapsed_ms
+    print(f"Session {session_id} +{elapsed_ms} ms to {bucket}, total now {TASK_TIME[session_id][bucket]} ms")
+    return {"session_id": session_id, "bucket": bucket, "total_ms": TASK_TIME[session_id][bucket]}
+
+
+# storage.py
+
+def log_reading_comprehension_details(session_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Append one RC event. We rely on start_time (client ms) for ordering.
+    Suppress the initial spurious blur that sometimes fires before the first active.
+
+    Rules:
+      - If the first event for a given passage_id is a tiny 'blur' with page_name='unknown',
+        drop it (do not store).
+      - If we receive the first 'active' and the immediately-previous event for that
+        passage_id is a tiny 'blur' with page_name='unknown', remove that blur retroactively.
+
+    A "tiny" blur is <= SPURIOUS_BLUR_MAX_MS (tweak as needed).
+    """
+    if session_id not in SESSIONS:
+        raise ValueError("Session not found.")
+
+    SPURIOUS_BLUR_MAX_MS = 250  # adjust if you encounter legitimate short blurs
+
+    passage_id = str(event.get("passage_id") or "")
+    status = str(event.get("status") or "active")
+    page_name = str(event.get("page_name") or "unknown")
+    start_time = int(event.get("start_time") or 0)
+    duration_ms = max(0, int(event.get("duration_ms") or 0))
+    server_ts = int(time.time() * 1000)
+
+    # Convenience handle to this session's events
+    events = RC_EVENTS[session_id]
+
+    # Did we already record an 'active' for this passage?
+    has_active_before = any(
+        ev.get("passage_id") == passage_id and ev.get("status") == "active"
+        for ev in events
+    )
+
+    # 1) Drop a *leading* tiny blur for this passage (before any active)
+    if (
+        status == "blur"
+        and not has_active_before
+        and page_name == "unknown"
+        and duration_ms <= SPURIOUS_BLUR_MAX_MS
+    ):
+        print(f"Session {session_id}: suppressed initial spurious blur for {passage_id} ({duration_ms} ms)")
+        # Return a minimal record to keep call sites happy; nothing persisted.
+        return {
+            "session_id": session_id,
+            "start_time": start_time,
+            "status": status,
+            "passage_id": passage_id,
+            "page_name": page_name,
+            "duration_ms": duration_ms,
+            "server_ts": server_ts,
+            "suppressed": True,
+        }
+
+    # 2) If this is the *first* active, and the immediately previous event for this passage
+    #    is a tiny blur, remove that blur retroactively.
+    if status == "active" and not has_active_before:
+        # find the most recent event for this passage (if any)
+        for i in range(len(events) - 1, -1, -1):
+            ev = events[i]
+            if ev.get("passage_id") == passage_id:
+                if (
+                    ev.get("status") == "blur"
+                    and (ev.get("page_name") or "unknown") == "unknown"
+                    and int(ev.get("duration_ms") or 0) <= SPURIOUS_BLUR_MAX_MS
+                ):
+                    removed = events.pop(i)
+                    print(f"Session {session_id}: removed leading spurious blur before first active for {passage_id}: {removed}")
+                break  # Only inspect the most recent entry for this passage
+
+    # Store the (possibly cleaned) event
+    rec = {
+        "session_id": session_id,
+        "start_time": start_time,
+        "status": status,
+        "passage_id": passage_id,
+        "page_name": page_name,
+        "duration_ms": duration_ms,
+        "server_ts": server_ts,
+    }
+    RC_EVENTS[session_id].append(rec)
+    print(f"Session {session_id} logged RC event: {rec}")
+    return rec
+
+
+# NOTE: We assume a single-process server (e.g., uvicorn workers=1).
+# Sequence increments are safe without a lock in this setup because
+# the function is synchronous and completes before yielding.
+# If we scale beyond one process, move counters to a shared store
+# (SQLite/Postgres/Redis) and use an atomic increment there.
