@@ -1,3 +1,5 @@
+console.log("app.js version: logging-lite-1");
+
 // --- Basic config ---
 const API_BASE = (window.API_BASE_OVERRIDE || "http://127.0.0.1:8000").replace(/\/+$/,"");
 
@@ -8,17 +10,6 @@ window.addEventListener("error", (e) => {
 window.addEventListener("unhandledrejection", (e) => {
   console.error("[unhandled-rejection]", e.reason);
 });
-
-// ---- Page instance & tab id ----
-const TAB_ID = sessionStorage.getItem("tab_id") || (() => {
-  const id = (crypto?.randomUUID?.() || ("tab_" + Math.random().toString(36).slice(2)));
-  sessionStorage.setItem("tab_id", id);
-  return id;
-})();
-
-function newPageInstanceId() {
-  return crypto?.randomUUID?.() || ("pg_" + Date.now() + "_" + Math.random().toString(36).slice(2));
-}
 
 // ---- Session helpers ----
 function getSession() { return localStorage.getItem("session_id"); }
@@ -40,29 +31,6 @@ function getCurrentQ(pid) { const v = localStorage.getItem(`current_q_${pid}`); 
 function setCurrentQ(pid, qidx) { localStorage.setItem(`current_q_${pid}`, String(qidx)); }
 function clearCurrentQ(pid) { localStorage.removeItem(`current_q_${pid}`); }
 
-// --- Event sequencing (per session) ---
-function seqKeyForSession() {
-  const sid = getSession();
-  return sid ? `evseq_${sid}` : "evseq__anon";
-}
-function getLastSeq() { return Number(localStorage.getItem(seqKeyForSession()) || "0"); }
-function setLastSeq(n) { localStorage.setItem(seqKeyForSession(), String(n)); }
-
-let seqChannel = null;
-try { seqChannel = new BroadcastChannel("event_seq"); } catch (_) {}
-if (seqChannel) {
-  seqChannel.onmessage = (e) => {
-    const n = Number(e.data || 0);
-    if (n > getLastSeq()) setLastSeq(n);
-  };
-}
-function nextEventSeq() {
-  const n = getLastSeq() + 1;
-  setLastSeq(n);
-  if (seqChannel) seqChannel.postMessage(n);
-  return n;
-}
-
 // --- Anti-copy guards (no logging) ---
 function installGuards() {
   ["copy","cut","paste","contextmenu"].forEach(evt => {
@@ -77,9 +45,7 @@ function installGuards() {
 
 // ---- Utilities ----
 function qs(sel){ return document.querySelector(sel); }
-function qsa(sel){ return Array.from(document.querySelectorAll(sel)); }
 function param(name){ return new URLSearchParams(location.search).get(name); }
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 async function api(path, options={}) {
   const url = `${API_BASE}${path}`;
@@ -92,73 +58,113 @@ function ensureSessionOrRedirect() {
   if (!getSession()) location.href = "consent.html";
 }
 
-// URL builder for /api if API_BASE set
-function safeUrl(path) {
-  if (typeof API_BASE === "string" && API_BASE) return `${API_BASE}${path}`;
-  return path;
-}
-
-// ---- Unified attention logging ("active" | "blur") ----
-let CURRENT_PAGE_INSTANCE_ID = null;
-
-// Marks that a navigation inside our app is happening; used to suppress blur logging
-let SUPPRESS_NEXT_BLUR = false;
+// ---- Navigation hint to suppress false "blur" on in-app nav ----
+let INAPP_NAV = false;
 function markInAppNavigation() {
-  SUPPRESS_NEXT_BLUR = true;
-  setTimeout(() => { SUPPRESS_NEXT_BLUR = false; }, 1500);
+  INAPP_NAV = true;
+  setTimeout(() => { INAPP_NAV = false; }, 2000);
 }
 
-function emitAttention(event_type, page_name, meta = {}) {
-  const session_id = getSession(); if (!session_id) return;
-  const rec = {
-    session_id,
-    seq: nextEventSeq(),          // client proposes; server finalizes
-    event_type,                   // "active" | "blur"
-    page_name,
-    start_time: Date.now(),       // client ms
-    page_instance_id: CURRENT_PAGE_INSTANCE_ID,
-    meta: { ...meta, tab_id: TAB_ID }
-  };
+// --- Logging helpers (fire-and-forget, never blocks UI) ---
+function ffPost(path, body) {
   try {
-    navigator.sendBeacon(
-      safeUrl("/api/event"),
-      new Blob([JSON.stringify(rec)], { type: "application/json" })
-    );
-  } catch {
-    fetch(safeUrl("/api/event"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(rec),
-      keepalive: true
-    }).catch(() => {});
-  }
+    const url = `${API_BASE}${path}`;
+    const json = JSON.stringify(body);
+    const blob = new Blob([json], { type: "application/json" });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(url, blob);
+    } else {
+      fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: json, keepalive: true }).catch(()=>{});
+    }
+  } catch (_) {}
 }
 
-// Only logs attention; no action/event noise
-function startFocusLogger(meta = {}) {
-  const page_name = meta.page || (document.body.dataset.page || "unknown");
-  CURRENT_PAGE_INSTANCE_ID = newPageInstanceId();
-  const baseMeta = { ...meta, page_instance_id: CURRENT_PAGE_INSTANCE_ID };
+/**
+ * Start attention tracking for a page bucket.
+ * If rcMeta is provided, we also emit detailed RC focus/blur segments.
+ * rcMeta = { passage_id, page_name_for_active }
+ */
+function startPageAttention(bucket, rcMeta) {
+  const session_id = getSession();
+  if (!session_id) return { stop: () => {} };
 
-  // Initial visible → active
-  if (!document.hidden) emitAttention("active", page_name, baseMeta);
+  let focused = (!document.hidden && document.hasFocus());
+  let activeStart = focused ? Date.now() : null;
+  let blurStart = !focused ? Date.now() : null;
 
-  // Leave study → blur (suppressed during in-app nav)
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      if (!SUPPRESS_NEXT_BLUR) emitAttention("blur", page_name, baseMeta);
-    } else {
-      emitAttention("active", page_name, baseMeta);
+  function sendActiveSegment(end) {
+    if (activeStart == null) return;
+    const dur = Math.max(0, end - activeStart);
+    if (dur > 0) {
+      ffPost("/api/log/attention", { session_id, bucket, elapsed_ms: dur });
+      if (rcMeta) {
+        ffPost("/api/log/rc_event", {
+          session_id,
+          passage_id: rcMeta.passage_id,
+          page_name: rcMeta.page_name_for_active || "unknown",
+          status: "active",
+          start_time: activeStart,
+          duration_ms: dur
+        });
+      }
     }
-  });
+    activeStart = null;
+  }
 
-  // Complementary focus/blur (avoid duplicates)
-  window.addEventListener("blur", () => {
-    if (!document.hidden && !SUPPRESS_NEXT_BLUR) emitAttention("blur", page_name, baseMeta);
-  });
-  window.addEventListener("focus", () => {
-    if (!document.hidden) emitAttention("active", page_name, baseMeta);
-  });
+  function sendBlurSegment(end) {
+    if (!rcMeta || blurStart == null) return;
+    const dur = Math.max(0, end - blurStart);
+    if (dur > 0) {
+      ffPost("/api/log/rc_event", {
+        session_id,
+        passage_id: rcMeta.passage_id,
+        page_name: "unknown",
+        status: "blur",
+        start_time: blurStart,
+        duration_ms: dur
+      });
+    }
+    blurStart = null;
+  }
+
+  function onFocus() {
+    const now = Date.now();
+    if (focused) return;
+    // closing blur segment
+    sendBlurSegment(now);
+    focused = true;
+    activeStart = now;
+  }
+
+  function onBlur() {
+    const now = Date.now();
+    if (!focused) return;
+    // closing active segment
+    sendActiveSegment(now);
+    focused = false;
+    blurStart = now;
+  }
+
+  function visHandler() {
+    if (document.hidden) onBlur(); else onFocus();
+  }
+  window.addEventListener("focus", onFocus);
+  window.addEventListener("blur", onBlur);
+  document.addEventListener("visibilitychange", visHandler);
+
+  function flush() {
+    const now = Date.now();
+    // If this is in-app navigation, we do not want to record a 'blur' segment
+    if (focused) {
+      sendActiveSegment(now);
+    } else if (!INAPP_NAV) {
+      sendBlurSegment(now);
+    }
+  }
+  window.addEventListener("pagehide", flush);
+  window.addEventListener("beforeunload", flush);
+
+  return { stop: flush };
 }
 
 installGuards();
@@ -166,7 +172,7 @@ installGuards();
 // --- Page controllers ---
 // consent.html
 async function initConsent() {
-  // Attention logs require a session; consent occurs pre-session → we skip logging here.
+  const att = startPageAttention("consent");
 
   const agreeBtn = document.getElementById("agree");
   const thanksBox = document.getElementById("thanks");
@@ -209,8 +215,75 @@ async function initConsent() {
 
 // demographic.html
 async function initDemographic() {
+  const att = startPageAttention("demographic");
+
+  // --- Q6 → L2 (Q7–Q10) gating ---
+  const L2_FIELDS = ["q7_native_language","q8_start_age","q9_years_studied","q10_years_in_us"];
+  const l2Tpl   = document.getElementById("l2-template");
+  const l2Mount = document.getElementById("l2-mount");
+
+  function q6IsNo() {
+    return (document.querySelector('input[name="q6_english_first"]:checked')?.value || "")
+      .trim().toLowerCase() === "no";
+  }
+
+  function setL2Required(on) {
+    L2_FIELDS.forEach(n => {
+      const el = document.querySelector(`[name="${n}"]`);
+      if (el) el.required = !!on;
+    });
+  }
+
+  function clearL2Values() {
+    L2_FIELDS.forEach(n => {
+      const el = document.querySelector(`[name="${n}"]`);
+      if (!el) return;
+      if (el.tagName === "SELECT") el.selectedIndex = 0;
+      else el.value = "";
+    });
+  }
+
+  function ensureL2Mounted() {
+    let el = document.getElementById("l2-block");
+    if (!el && l2Tpl && l2Mount) {
+      l2Mount.appendChild(l2Tpl.content.cloneNode(true));
+      el = document.getElementById("l2-block");
+    }
+    return el;
+  }
+
+  function showL2() {
+    const el = ensureL2Mounted();
+    if (!el) return;
+    el.setAttribute("data-show", "1");
+    setL2Required(true);
+  }
+
+  function hideL2({ clear=true } = {}) {
+    const el = document.getElementById("l2-block");
+    if (el) el.removeAttribute("data-show");
+    setL2Required(false);
+    if (clear) clearL2Values();
+  }
+
+  function syncL2({ init=false } = {}) {
+    if (q6IsNo()) showL2();
+    else hideL2({ clear: !init });
+  }
+
+  // Initial + resilience passes (covers form state restore, focus flips, etc.)
+  syncL2({ init: true });
+  requestAnimationFrame(() => syncL2({}));
+  setTimeout(() => syncL2({}), 250);
+  window.addEventListener("pageshow", () => syncL2({}));
+
+  // React to user changes
+  document.addEventListener("change", (e) => {
+    if (e.target?.name === "q6_english_first") syncL2({});
+  });
+
+  // --- the rest of initDemographic() ---
   ensureSessionOrRedirect();
-  startFocusLogger({ page: "demographic" });
 
   // --- Render citizenship checkboxes (Q3) ---
   const COUNTRIES = [
@@ -274,9 +347,6 @@ async function initDemographic() {
       li.style.display = label.includes(q) ? "" : "none";
     }
   });
-  if (!civDetails || !civClose || !civWrap || !civSummary || !civSearch) {
-    console.error("Citizenship dropdown elements missing", { civDetails, civClose, civWrap, civSummary, civSearch });
-  }
   civClose?.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -330,11 +400,10 @@ async function initRCInstructions() {
   const assigned = getAssignedPassages();
   if (!assigned || !assigned[idx]) { location.href = "demographic.html"; return; }
 
-  const pid = assigned[idx];
-  startFocusLogger({ page: "rc_instructions", passage_id: pid, passage_index: idx });
+  startPageAttention("reading_instruction");
 
-  const agreeBtn  = document.getElementById("agree");
   const startLink = document.getElementById("startLink");
+  const agreeBtn  = document.getElementById("agree");
   const agreedKey = `rc_agree_${getSession()}`;
   const nextHref  = `passage.html?index=${idx}`;
 
@@ -366,7 +435,9 @@ async function initPassage() {
   const pid = assigned?.[idx];
   if (!pid) { location.href = "consent.html"; return; }
 
-  startFocusLogger({ page: "passage", passage_id: pid, passage_index: idx, is_reread: (param("r")==="1") });
+  const bucket = (idx === 0) ? "reading_task1" : "reading_task2";
+  const pageName = (idx === 0) ? "p1" : "p2";
+  startPageAttention(bucket, { passage_id: pid, page_name_for_active: pageName });
 
   const visits = getVisitCount(pid) + 1;
   setVisitCount(pid, visits);
@@ -428,14 +499,15 @@ async function initQuestions() {
   const pid = assigned[idx];
   if (!pid) { location.href = "consent.html"; return; }
 
-  // Fetch questions FIRST so we can include required meta in attention logs
+  // Fetch questions FIRST
   const payload = await api(`/api/questions/${encodeURIComponent(pid)}?session_id=${encodeURIComponent(getSession())}`);
   const total = payload.questions.length;
   const q = payload.questions[qidx];
   if (!q) { location.href = `questions.html?index=${idx}&q=0`; return; }
 
-  // Now start attention logger (mandatory RC meta present)
-  startFocusLogger({ page: "questions", passage_id: pid, passage_index: idx, question_id: q.id, question_index: qidx });
+  const bucket = (idx === 0) ? "reading_task1" : "reading_task2";
+  const pageName = (idx === 0 ? "p1" : "p2") + "q" + (qidx + 1);
+  startPageAttention(bucket, { passage_id: pid, page_name_for_active: pageName });
 
   const pageStart = performance.now();
 
@@ -481,7 +553,7 @@ async function initQuestions() {
 
   qs("#progress").textContent = `Q${qidx + 1} of ${total}`;
 
-  // Back to passage (no logging; only navigation)
+  // Back to passage
   qs("#backToPassage").addEventListener("click", () => {
     const clicks = getBackClicks(pid) + 1;
     setBackClicks(pid, clicks);
@@ -549,7 +621,8 @@ async function initPostTask() {
   const pid = assigned[idx];
   if (!pid) { location.href = "consent.html"; return; }
 
-  startFocusLogger({ page: "posttask", passage_id: pid, passage_index: idx });
+  const bucket = (idx === 0) ? "survey_task1" : "survey_task2";
+  startPageAttention(bucket);
 
   const data = await api(`/api/posttask_data/${encodeURIComponent(pid)}?session_id=${encodeURIComponent(getSession())}`);
   qs("#passageTitle").textContent = `Passage ${passageOrdinal(idx)}`;
@@ -626,7 +699,7 @@ async function initPostTask() {
 // vocab.html
 async function initVocab() {
   ensureSessionOrRedirect();
-  startFocusLogger({ page: "vocab" });
+  startPageAttention("vocabulary");
 
   let current = null;
   let lastShownAt = null;
@@ -670,7 +743,6 @@ async function initVocab() {
 // final_check.html
 async function initFinalCheck() {
   ensureSessionOrRedirect();
-  startFocusLogger({ page: "final_check" });
 
   const form = document.getElementById("final-form");
   const toolsBlock = document.getElementById("tools-block");
@@ -720,6 +792,14 @@ async function initFinalCheck() {
   });
 }
 
+// thanks.html — record total participation time
+async function initThanks() {
+  const sid = getSession();
+  if (sid) {
+    ffPost("/api/log/participation_end", { session_id: sid, finished_at_ms: Date.now() });
+  }
+}
+
 // --- Router (runs even if JS loads after DOMContentLoaded) ---
 function bootstrap() {
   const page = document.body?.dataset?.page;
@@ -732,6 +812,7 @@ function bootstrap() {
     "posttask": initPostTask,
     "vocab": initVocab,
     "final_check": initFinalCheck,
+    "thanks": initThanks,
   };
   if (page && map[page]) {
     try { map[page](); } catch (err) { console.error("[bootstrap] init error:", err); }

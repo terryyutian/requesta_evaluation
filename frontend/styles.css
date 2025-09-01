@@ -29,6 +29,8 @@ body {
 }
 
 h1, h2 { margin-top: 0; }
+
+#l2-block:not([data-show="1"]) { display: none !important; }
 button {
   background: var(--accent); color: #052e16; border: none; padding: 12px 18px;
   border-radius: 10px; cursor: pointer; font-weight: 700;
@@ -207,3 +209,22 @@ button.danger {
 }
 button.danger:hover { filter: brightness(1.1); }
 button.danger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+
+/* Stack Q7–Q10 inputs under their question text */
+#l2-block label.option-row {
+  display: block;          /* stop inline row layout */
+  align-items: initial;
+  gap: 0;
+}
+
+#l2-block label.option-row
+  > input:not([type="radio"]):not([type="checkbox"]),
+#l2-block label.option-row > select,
+#l2-block label.option-row > textarea {
+  display: block;          /* move input to a new line */
+  width: 100%;
+  margin-top: 8px;         /* spacing under the label text */
+  /* optional, to prevent super-wide fields on huge screens: */
+  max-width: 480px;
+}
