@@ -8,17 +8,27 @@
 <body data-page="posttask">
   <div class="container">
     <div class="grid">
+      <!-- Left: passage -->
       <div class="card">
         <h2 id="passageTitle">Passage Title</h2>
-        <div id="passageText" class="passage"></div> 
+        <div id="passageText" class="passage"></div>
       </div>
+
+      <!-- Right: step-by-step review -->
       <div class="card">
+        <div class="badge" id="ptProgress">Question ? of ?</div>
         <h3>Question Quality Survey</h3>
         <p>A high-quality multiple-choice question uses a clear stem and options to assess important information from the text. It includes one clearly best correct answer and distractors (incorrect choices) that are plausible yet incorrect.</p>
         <p>If you think the question is in good quality and helps you understand the text, give a thumbs up. Otherwise, give it a thumbs down.</p>
+
+        <!-- Single-question review area -->
         <div id="review">Loading...</div>
+
+        <!-- Nav / actions -->
         <div class="right" style="margin-top:16px;">
-          <button id="continue">Continue →</button>
+          <button class="secondary" id="prevPT">← Previous Question</button>
+          <button id="nextPT">Next Question →</button>
+          <button id="proceed" style="display:none;">Proceed to Next Task →</button>
         </div>
       </div>
     </div>

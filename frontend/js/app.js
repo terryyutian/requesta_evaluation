@@ -639,9 +639,11 @@ async function initPostTask() {
   const bucket = (idx === 0) ? "survey_task1" : "survey_task2";
   startPageAttention(bucket);
 
+  // Fetch payload (passage + correctness + choices)
   const data = await api(`/api/posttask_data/${encodeURIComponent(pid)}?session_id=${encodeURIComponent(getSession())}`);
   qs("#passageTitle").textContent = `Passage ${passageOrdinal(idx)}`;
 
+  // Render passage (left)
   const wrap = qs("#passageText");
   wrap.innerHTML = "";
   const raw = (data.passage.text || "").replace(/\r\n/g, "\n").trim();
@@ -656,14 +658,47 @@ async function initPostTask() {
     wrap.appendChild(p);
   }
 
-  const right = qs("#review");
-  right.innerHTML = "";
-  data.questions.forEach(q => {
-    const row = document.createElement("div");
-    row.className = "card";
-    const icon = q.is_correct ? "✅" : "❌";
+  // --- Step-by-step review state
+  const reviewEl   = qs("#review");
+  const progressEl = qs("#ptProgress");
+  const prevBtn    = qs("#prevPT");
+  const nextBtn    = qs("#nextPT");
+  const proceedBtn = qs("#proceed");
+
+  const questions = data.questions || [];
+  let cur = 0;
+
+  // Track ratings and whether the first question has been rated
+  const ratings = {};
+  let firstRated = false;
+
+  function updateNav() {
+    // Previous: hidden on Q1; on later questions, only show if Q1 has been rated
+    if (cur === 0) {
+      prevBtn.style.display = "none";
+    } else {
+      prevBtn.style.display = firstRated ? "" : "none";
+    }
+
+    // Next vs Proceed
+    if (cur < questions.length - 1) {
+      nextBtn.style.display = "";
+      proceedBtn.style.display = "none";
+    } else {
+      nextBtn.style.display = "none";
+      proceedBtn.style.display = "";
+    }
+  }
+
+  // Render one question panel
+  function render() {
+    const q = questions[cur];
+    if (!q) { reviewEl.textContent = "No questions to review."; return; }
+
+    progressEl.textContent = `Question ${cur + 1} of ${questions.length}`;
+
     const listHTML = q.choices.map(c => {
-      const isUser = c.id === q.user_choice_id;
+      const isUser    = c.id === q.user_choice_id;
       const isCorrect = c.id === q.correct_choice_id;
       const badges = [
         isCorrect ? '<span class="badge-sm ok">Correct</span>' : '',
@@ -676,30 +711,62 @@ async function initPostTask() {
           </div>
         </li>`;
     }).join("");
-    row.innerHTML = `
-      <div class="badge">${icon} ${q.is_correct ? "Correct" : "Incorrect"}</div>
-      <h3>${q.prompt}</h3>
-      <ul class="review-choices">
+
+    reviewEl.innerHTML = `
+      <div class="badge">${q.is_correct ? "✅ Correct" : "❌ Incorrect"}</div>
+      <h3 style="margin-top:8px;">${q.prompt}</h3>
+      <ul class="review-choices" style="margin-top:8px;">
         ${listHTML}
       </ul>
-      <div style="margin-top:8px;">
+      <div style="margin-top:12px;">
         <span class="thumb" data-q="${q.question_id}" data-v="1">👍</span>
         <span class="thumb" data-q="${q.question_id}" data-v="-1">👎</span>
       </div>
     `;
-    right.appendChild(row);
-  });
 
-  const ratings = {};
-  right.addEventListener("click", (e) => {
-    const t = e.target;
-    if (t.classList.contains("thumb")) {
-      ratings[t.dataset.q] = Number(t.dataset.v);
-      t.style.borderColor = "var(--accent)";
+    // apply saved selection styling (if any)
+    const existing = ratings[q.question_id];
+    if (existing === 1) {
+      const up = reviewEl.querySelector('.thumb[data-v="1"]');
+      if (up) up.style.borderColor = "var(--accent)";
+    } else if (existing === -1) {
+      const down = reviewEl.querySelector('.thumb[data-v="-1"]');
+      if (down) down.style.borderColor = "var(--accent)";
     }
+
+    updateNav();
+  }
+
+  // Delegated click for thumbs in current panel
+  reviewEl.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!t.classList.contains("thumb")) return;
+    const qid = t.dataset.q;
+    const val = Number(t.dataset.v);
+
+    ratings[qid] = val;
+
+    // If this rating is for the first question, remember it
+    if (questions[0] && qid === questions[0].question_id) {
+      firstRated = true;
+    }
+
+    // reset visual state, then highlight picked
+    reviewEl.querySelectorAll(".thumb").forEach(el => { el.style.borderColor = "#1f2a3f"; });
+    t.style.borderColor = "var(--accent)";
+
+    updateNav(); // reflect any change to firstRated immediately
   });
 
-  qs("#continue").addEventListener("click", async () => {
+  // navigation
+  prevBtn.addEventListener("click", () => {
+    if (cur > 0) { cur -= 1; render(); }
+  });
+  nextBtn.addEventListener("click", () => {
+    if (cur < questions.length - 1) { cur += 1; render(); }
+  });
+
+  proceedBtn.addEventListener("click", async () => {
     await api("/api/posttask", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ session_id: getSession(), passage_id: pid, ratings })
@@ -707,9 +774,29 @@ async function initPostTask() {
     const nextIdx = idx + 1;
     markInAppNavigation();
     if (nextIdx < assigned.length) location.href = `passage.html?index=${nextIdx}`;
-    else location.href = "vocab.html";
+    else location.href = "vocabulary_instruction.html";
   });
+
+  // Kick off
+  render();
 }
+
+// vocabulary_instruction.html
+async function initVocabInstruction() {
+  ensureSessionOrRedirect();
+
+  // Count this time in the "vocabulary" bucket so it rolls up with the vocab task
+  startPageAttention("vocabulary");
+
+  const btn = document.getElementById("startVocab");
+  if (btn) {
+    btn.addEventListener("click", () => {
+      markInAppNavigation();               // avoid a false blur segment on nav
+      location.href = "vocab.html";
+    }, { once: true });
+  }
+}
+
 
 // vocab.html
 async function initVocab() {
@@ -825,6 +912,7 @@ function bootstrap() {
     "passage": initPassage,
     "questions": initQuestions,
     "posttask": initPostTask,
+    "vocab_instruction": initVocabInstruction,
     "vocab": initVocab,
     "final_check": initFinalCheck,
     "thanks": initThanks,
