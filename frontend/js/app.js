@@ -668,26 +668,31 @@ async function initPostTask() {
   const questions = data.questions || [];
   let cur = 0;
 
-  // Track ratings and whether the first question has been rated
+  // Track ratings
   const ratings = {};
-  let firstRated = false;
+
+  function hasRatingFor(index) {
+    const q = questions[index];
+    if (!q) return false;
+    const r = ratings[q.question_id];
+    return r === 1 || r === -1;
+  }
 
   function updateNav() {
-    // Previous: hidden on Q1; on later questions, only show if Q1 has been rated
-    if (cur === 0) {
-      prevBtn.style.display = "none";
-    } else {
-      prevBtn.style.display = firstRated ? "" : "none";
-    }
+    const onLast = (cur === questions.length - 1);
+    const curHasRating = hasRatingFor(cur);
 
-    // Next vs Proceed
-    if (cur < questions.length - 1) {
-      nextBtn.style.display = "";
-      proceedBtn.style.display = "none";
-    } else {
-      nextBtn.style.display = "none";
-      proceedBtn.style.display = "";
+    // Previous: show on any question after the first, regardless of rating
+    if (prevBtn) prevBtn.style.display = (cur > 0) ? "" : "none";
+
+    // Next/Proceed: only show when current question has a rating
+    if (!curHasRating) {
+      if (nextBtn)    nextBtn.style.display = "none";
+      if (proceedBtn) proceedBtn.style.display = "none";
+      return;
     }
+    if (nextBtn)    nextBtn.style.display = onLast ? "none" : "";
+    if (proceedBtn) proceedBtn.style.display = onLast ? "" : "none";
   }
 
   // Render one question panel
@@ -746,16 +751,11 @@ async function initPostTask() {
 
     ratings[qid] = val;
 
-    // If this rating is for the first question, remember it
-    if (questions[0] && qid === questions[0].question_id) {
-      firstRated = true;
-    }
-
     // reset visual state, then highlight picked
     reviewEl.querySelectorAll(".thumb").forEach(el => { el.style.borderColor = "#1f2a3f"; });
     t.style.borderColor = "var(--accent)";
 
-    updateNav(); // reflect any change to firstRated immediately
+    updateNav(); // reflect visibility changes immediately
   });
 
   // navigation
@@ -767,6 +767,9 @@ async function initPostTask() {
   });
 
   proceedBtn.addEventListener("click", async () => {
+    // Guard (should be unreachable if hidden, but safe)
+    if (!hasRatingFor(cur)) return;
+
     await api("/api/posttask", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ session_id: getSession(), passage_id: pid, ratings })
@@ -780,6 +783,8 @@ async function initPostTask() {
   // Kick off
   render();
 }
+
+
 
 // vocabulary_instruction.html
 async function initVocabInstruction() {
