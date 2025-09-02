@@ -1,0 +1,8 @@
+/*.html
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+
+/js/app.js
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+
+/styles.css
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0

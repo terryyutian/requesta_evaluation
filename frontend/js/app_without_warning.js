@@ -1,3 +1,4 @@
+console.log("app.js version: logging-lite-1");
 
 // --- Basic config ---
 const API_BASE = (window.API_BASE_OVERRIDE || "http://127.0.0.1:8000").replace(/\/+$/,"");
@@ -80,12 +81,10 @@ function ffPost(path, body) {
 
 /**
  * Start attention tracking for a page bucket.
- * If rcMeta is provided, we also emit detailed RC focus/blur segments
- * and optionally warn on refocus after a long blur.
+ * If rcMeta is provided, we also emit detailed RC focus/blur segments.
  * rcMeta = { passage_id, page_name_for_active }
- * warnOnReturnMs: number | null  (e.g., 5000 to warn when returning after >=5s blur)
  */
-function startPageAttention(bucket, rcMeta, warnOnReturnMs = null) {
+function startPageAttention(bucket, rcMeta) {
   const session_id = getSession();
   if (!session_id) return { stop: () => {} };
 
@@ -131,18 +130,8 @@ function startPageAttention(bucket, rcMeta, warnOnReturnMs = null) {
   function onFocus() {
     const now = Date.now();
     if (focused) return;
-
-    // Capture blur duration before sending/clearing
-    const priorBlurDur = blurStart != null ? (now - blurStart) : 0;
-
-    // close blur segment
+    // closing blur segment
     sendBlurSegment(now);
-
-    // Show warning only for RC pages, over threshold, and not due to in-app nav
-    if (rcMeta && warnOnReturnMs != null && priorBlurDur >= warnOnReturnMs && !INAPP_NAV) {
-      alert("Please stay focused on the reading comprehension task.");
-    }
-
     focused = true;
     activeStart = now;
   }
@@ -150,7 +139,7 @@ function startPageAttention(bucket, rcMeta, warnOnReturnMs = null) {
   function onBlur() {
     const now = Date.now();
     if (!focused) return;
-    // close active segment
+    // closing active segment
     sendActiveSegment(now);
     focused = false;
     blurStart = now;
@@ -165,11 +154,10 @@ function startPageAttention(bucket, rcMeta, warnOnReturnMs = null) {
 
   function flush() {
     const now = Date.now();
+    // If this is in-app navigation, we do not want to record a 'blur' segment
     if (focused) {
-      // Closing active segment
       sendActiveSegment(now);
     } else if (!INAPP_NAV) {
-      // Only record a blur segment on unload if not doing in-app navigation
       sendBlurSegment(now);
     }
   }
@@ -184,7 +172,7 @@ installGuards();
 // --- Page controllers ---
 // consent.html
 async function initConsent() {
-  startPageAttention("consent");
+  const att = startPageAttention("consent");
 
   const agreeBtn = document.getElementById("agree");
   const thanksBox = document.getElementById("thanks");
@@ -227,7 +215,7 @@ async function initConsent() {
 
 // demographic.html
 async function initDemographic() {
-  startPageAttention("demographic");
+  const att = startPageAttention("demographic");
 
   // --- Q6 → L2 (Q7–Q10) gating ---
   const L2_FIELDS = ["q7_native_language","q8_start_age","q9_years_studied","q10_years_in_us"];
@@ -283,7 +271,7 @@ async function initDemographic() {
     else hideL2({ clear: !init });
   }
 
-  // Initial + resilience passes
+  // Initial + resilience passes (covers form state restore, focus flips, etc.)
   syncL2({ init: true });
   requestAnimationFrame(() => syncL2({}));
   setTimeout(() => syncL2({}), 250);
@@ -297,7 +285,7 @@ async function initDemographic() {
   // --- the rest of initDemographic() ---
   ensureSessionOrRedirect();
 
-  // Dropdown plumbing for Q3
+  // --- Render citizenship checkboxes (Q3) ---
   const COUNTRIES = [
     "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria",
     "Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan",
@@ -321,6 +309,7 @@ async function initDemographic() {
     "Yemen","Zambia","Zimbabwe"
   ];
 
+  // Dropdown plumbing for Q3
   const civWrap = document.getElementById("citizenshipOptions");
   const civSearch = document.getElementById("citizenshipSearch");
   const civSummary = document.getElementById("citizenshipSummary");
@@ -448,8 +437,7 @@ async function initPassage() {
 
   const bucket = (idx === 0) ? "reading_task1" : "reading_task2";
   const pageName = (idx === 0) ? "p1" : "p2";
-  // Warn when returning after >= 5s blur on RC pages
-  startPageAttention(bucket, { passage_id: pid, page_name_for_active: pageName }, 5000);
+  startPageAttention(bucket, { passage_id: pid, page_name_for_active: pageName });
 
   const visits = getVisitCount(pid) + 1;
   setVisitCount(pid, visits);
@@ -489,7 +477,7 @@ async function initPassage() {
     if (backToQ) {
       backToQ.textContent = "Back to Current Question →";
       backToQ.style.display = "";
-      backToQ.onclick = () => { markInAppNavigation(); location.href = nextHref; };
+      backToQ.onclick = () => { location.href = nextHref; };
     }
   } else {
     // Regular first-time flow: show only the Next link
@@ -497,8 +485,8 @@ async function initPassage() {
     if (nextLink) {
       nextLink.style.display = "inline-block";
       nextLink.setAttribute("href", nextHref);
-      // mark in-app nav to avoid false blur warnings
-      nextLink.addEventListener("click", () => { markInAppNavigation(); }, { once: true });
+      // (Optional) prevent double-activations:
+      nextLink.onclick = null;
     }
   }
 }
@@ -521,8 +509,7 @@ async function initQuestions() {
 
   const bucket = (idx === 0) ? "reading_task1" : "reading_task2";
   const pageName = (idx === 0 ? "p1" : "p2") + "q" + (qidx + 1);
-  // Warn when returning after >= 5s blur on RC pages
-  startPageAttention(bucket, { passage_id: pid, page_name_for_active: pageName }, 5000);
+  startPageAttention(bucket, { passage_id: pid, page_name_for_active: pageName });
 
   const pageStart = performance.now();
 
