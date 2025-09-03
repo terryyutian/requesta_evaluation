@@ -1,8 +1,6 @@
 # Slim Python base
 FROM python:3.11-slim
 
-FROM python:3.11-slim
-
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
@@ -27,4 +25,4 @@ RUN pip install --upgrade pip && pip install .
 ENV PORT=8080
 
 # Point to your app inside backend/main.py
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "${PORT}"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
