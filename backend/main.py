@@ -21,7 +21,7 @@ app = FastAPI(title="Study Data Collection API", version="0.1.0")
 # CORS: allow your front-end origin(s)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten for production
+    allow_origin_regex=r"https://[a-z0-9-]+\.netlify\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
