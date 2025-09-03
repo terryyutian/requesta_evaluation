@@ -1,6 +1,6 @@
 import random
 from typing import List
-from data import PASSAGES, QUESTIONS
+from .data import PASSAGES, QUESTIONS
 
 def random_two_passages(seed: int | None = None) -> List[str]:
     """

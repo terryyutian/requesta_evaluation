@@ -5,17 +5,16 @@ from typing import List, Dict, Any, Optional
 import math
 import time
 
-from schemas import (
+from .schemas import (
     SessionStartRequest, SessionStartResponse, DemographicsPayload, RandomizeResponse,
     Passage, QuestionsResponse, SubmitMCQPayload, MCQSubmitResult, PostTaskFeedbackPayload,
-   VocabNextResponse, VocabItem, VocabAnswerPayload
+   VocabNextResponse, VocabItem, VocabAnswerPayload, AttentionLogPayload, RCEventPayload, ParticipationEndRequest
 )
-from security import new_session_id
-from randomizer import random_two_passages, maybe_shuffle_choices
-from data import PASSAGES, QUESTIONS, VOCAB
-from helper import normalize_demographics
-import storage
-from schemas import AttentionLogPayload, RCEventPayload, ParticipationEndRequest
+from .security import new_session_id
+from .randomizer import random_two_passages, maybe_shuffle_choices
+from .data import PASSAGES, QUESTIONS, VOCAB
+from .helper import normalize_demographics
+from . import storage
 
 app = FastAPI(title="Study Data Collection API", version="0.1.0")
 
