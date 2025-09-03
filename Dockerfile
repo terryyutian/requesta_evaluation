@@ -25,4 +25,4 @@ RUN pip install --upgrade pip && pip install .
 ENV PORT=8080
 
 # Point to your app inside backend/main.py
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["python", "-c", "import os, uvicorn; uvicorn.run('backend.main:app', host='0.0.0.0', port=int(os.environ.get('PORT','8080')))"]
