@@ -22,4 +22,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["backend", "frontend"] 
+packages = ["backend"] 
