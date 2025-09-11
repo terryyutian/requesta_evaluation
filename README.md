@@ -3,7 +3,7 @@ a web application built to collect data for ReQUESTA evaluation
 
 ```bash
 
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv && source .venv/scripts/activate
 pip install -e .
 
 
