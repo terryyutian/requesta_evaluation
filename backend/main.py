@@ -5,23 +5,33 @@ from typing import List, Dict, Any, Optional
 import math
 import time
 
-from .schemas import (
+from schemas import (
     SessionStartRequest, SessionStartResponse, DemographicsPayload, RandomizeResponse,
     Passage, QuestionsResponse, SubmitMCQPayload, MCQSubmitResult, PostTaskFeedbackPayload,
    VocabNextResponse, VocabItem, VocabAnswerPayload, AttentionLogPayload, RCEventPayload, ParticipationEndRequest
 )
-from .security import new_session_id
-from .randomizer import random_two_passages, maybe_shuffle_choices
-from .data import PASSAGES, QUESTIONS, VOCAB
-from .helper import normalize_demographics
-from . import storage
+from security import new_session_id
+from randomizer import random_two_passages, maybe_shuffle_choices
+from data import PASSAGES, QUESTIONS, VOCAB
+from helper import normalize_demographics
+import storage
 
 app = FastAPI(title="Study Data Collection API", version="0.1.0")
+
+ALLOWED_ORIGINS = [
+    "https://silver-frangollo-57d267.netlify.app",  # your Netlify site
+    "http://localhost:8000",                        # optional local API tests
+    "http://127.0.0.1:5500",                        # optional local file server
+    "http://localhost:5500",                        # optional local file server
+]
 
 # CORS: allow your front-end origin(s)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https://[a-z0-9-]+\.netlify\.app",
+    allow_origins=[
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -164,6 +174,8 @@ def vocab_start(session_id: str):
     storage.init_vocab(session_id, size=len(VOCAB))
     return {"ok": True, "size": len(VOCAB)}
 
+# main.py -> in vocab_next()
+
 @app.get("/api/vocab/next", response_model=VocabNextResponse)
 def vocab_next(session_id: str):
     prog = storage.get_vocab_progress(session_id)
@@ -172,18 +184,37 @@ def vocab_next(session_id: str):
     if idx >= size or idx >= len(VOCAB):
         return VocabNextResponse(done=True, remaining=0, item=None)
     item = VOCAB[idx]
+
+    # Ensure ID exists before returning
+    iid = item.get("id") or f"v{idx}"
+    item["id"] = iid  # persist for later lookups
+
     return VocabNextResponse(
         done=False,
         remaining=max(0, min(size, len(VOCAB)) - idx),
-        item=VocabItem(id=item["id"], token=item["token"])
+        item=VocabItem(id=iid, token=item["token"])
     )
+
 
 @app.post("/api/vocab/answer")
 def vocab_answer(payload: VocabAnswerPayload):
     if payload.session_id not in storage.SESSIONS:
         raise HTTPException(status_code=404, detail="Session not found.")
+
+    # Look up truth label for this item_id
+    truth = None
+    for it in VOCAB:
+        if it["id"] == payload.item_id:
+            truth = it.get("is_word")
+            break
+    if truth is None:
+        raise HTTPException(status_code=400, detail="Unknown vocabulary item.")
+
+    # Persist the response
     storage.advance_vocab(payload.session_id, payload.item_id, payload.is_word, payload.rt_ms)
-    return {"ok": True}
+
+    # Return immediate correctness for the HUD
+    return {"ok": True, "correct": bool(payload.is_word == truth)}
 
 
 @app.post("/api/final_check")

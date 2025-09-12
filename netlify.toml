@@ -1,3 +1,0 @@
-[build]
-publish = "frontend"   # <-- change if your folder is named differently
-command = ""           # static site, no build step

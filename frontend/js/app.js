@@ -1,6 +1,6 @@
 
 // --- Basic config ---
-const API_BASE = (window.API_BASE_OVERRIDE || "http://127.0.0.1:8000").replace(/\/+$/,"");
+const API_BASE = "http://127.0.0.1:8000";
 
 // Minimal global error surfacing
 window.addEventListener("error", (e) => {
@@ -46,11 +46,27 @@ function installGuards() {
 function qs(sel){ return document.querySelector(sel); }
 function param(name){ return new URLSearchParams(location.search).get(name); }
 
-async function api(path, options={}) {
+async function api(path, options = {}) {
   const url = `${API_BASE}${path}`;
-  const res = await fetch(url, options);
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-  return res.json();
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (netErr) {
+    const err = new Error(`Network error to ${url}: ${netErr?.message || netErr}`);
+    err.cause = netErr;
+    throw err;
+  }
+  if (!res.ok) {
+    let body = "";
+    try { body = await res.text(); } catch (_) {}
+    const err = new Error(`HTTP ${res.status} ${res.statusText} @ ${url}\n${body}`);
+    err.status = res.status;
+    err.body = body;
+    err.url = url;
+    throw err;
+  }
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json") ? res.json() : res.text();
 }
 
 function ensureSessionOrRedirect() {
@@ -179,7 +195,10 @@ function startPageAttention(bucket, rcMeta, warnOnReturnMs = null) {
   return { stop: flush };
 }
 
-installGuards();
+// Disable copy/paste/contextmenu guards when ?debug=1 is present
+const DEBUG_MODE = new URLSearchParams(location.search).has("debug");
+if (!DEBUG_MODE) installGuards();
+
 
 // --- Page controllers ---
 // consent.html
@@ -189,41 +208,40 @@ async function initConsent() {
   const agreeBtn = document.getElementById("agree");
   const thanksBox = document.getElementById("thanks");
   const nextBtn   = document.getElementById("next");
-
   if (!agreeBtn || !thanksBox || !nextBtn) {
     console.error("[consent] Missing DOM nodes", { agreeBtn, thanksBox, nextBtn });
     return;
   }
 
   agreeBtn.type = "button";
-  agreeBtn.addEventListener("click", async () => {
+  agreeBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
     agreeBtn.disabled = true;
     try {
       const r = await api("/api/session/start", {
         method: "POST",
-        headers: {"Content-Type":"application/json"},
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source: "web", consent: true })
       });
       setSession(r.session_id);
-      thanksBox.style.display = "block";
-      nextBtn.focus();
     } catch (err) {
       console.error("[consent] session start failed:", err);
-      alert("We had a temporary issue starting your session, but you can continue.");
       setSession(crypto?.randomUUID?.() || ("tmp_" + Date.now()));
+    } finally {
       thanksBox.style.display = "block";
       nextBtn.focus();
-    } finally {
       agreeBtn.disabled = false;
     }
   }, { once: true });
 
-  nextBtn.addEventListener("click", () => {
+  nextBtn.addEventListener("click", (e) => {
+    e.preventDefault();
     if (!getSession()) { alert("Please click I Agree first."); return; }
     markInAppNavigation();
     location.href = "demographic.html";
   });
 }
+
 
 // demographic.html
 async function initDemographic() {
@@ -369,39 +387,244 @@ async function initDemographic() {
 
   // submission
   const form = qs("#demo-form");
+  const submitBtn = form.querySelector('button[type="submit"]');
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const fd = new FormData(form);
-    const payload = Object.fromEntries(fd.entries());
-    payload.citizenship = Array.from(document.querySelectorAll('input[name="citizenship"]:checked')).map(i => i.value);
 
-    const age = Number(payload.q1_age);
-    if (!Number.isFinite(age) || age < 18) {
-      alert("You must be at least 18 years old to participate.");
-      return;
-    }
-    if (payload.q4_ethnicity !== "Multiple ethnicity / Other") {
-      delete payload.q4_ethnicity_other;
-    }
-    if (payload.q6_english_first === "Yes") {
-      delete payload.q7_native_language;
-      delete payload.q8_start_age;
-      delete payload.q9_years_studied;
-      delete payload.q10_years_in_us;
-    }
+    // Optional: let the browser do native validation first
+    if (!form.reportValidity()) return;
 
-    await api(`/api/demographics?session_id=${encodeURIComponent(getSession())}`, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify(payload)
-    });
+    submitBtn?.setAttribute("disabled", "disabled");
+    try {
+      const fd = new FormData(form);
+      const payload = Object.fromEntries(fd.entries());
+      payload.citizenship = Array.from(document.querySelectorAll('input[name="citizenship"]:checked')).map(i => i.value);
 
-    const rnd = await api(`/api/randomize?session_id=${encodeURIComponent(getSession())}`, { method: "POST" });
-    setAssignedPassages(rnd.passage_ids);
+      const age = Number(payload.q1_age);
+      if (!Number.isFinite(age) || age < 18) {
+        alert("You must be at least 18 years old to participate.");
+        return;
+      }
+      if (payload.q4_ethnicity !== "Multiple ethnicity / Other") {
+        delete payload.q4_ethnicity_other;
+      }
+      if (payload.q6_english_first === "Yes") {
+        delete payload.q7_native_language;
+        delete payload.q8_start_age;
+        delete payload.q9_years_studied;
+        delete payload.q10_years_in_us;
+      }
+
+      // 1) Demographics
+      await api(`/api/demographics?session_id=${encodeURIComponent(getSession())}`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      });
+
+      // 2) Randomize
+      const rnd = await api(`/api/randomize?session_id=${encodeURIComponent(getSession())}`, { method: "POST" });
+      setAssignedPassages(rnd.passage_ids);
+
+      // 3) Navigate
+      markInAppNavigation();
+      location.href = "vocab_instruction.html"; // <- if vocab now comes first per your new flow
+      // or "instructions.html?index=0" if RC still comes first in your current run
+    } catch (err) {
+      console.error("[demographic submit] failed:", err);
+      alert("Sorry—saving your responses hit an error.\nCheck your internet connection, then try again.");
+    } finally {
+      submitBtn?.removeAttribute("disabled");
+    }
+  });
+
+  }
+
+
+// vocabulary_instruction.html
+async function initVocabInstruction() {
+  ensureSessionOrRedirect();
+
+  // Count this time in the "vocabulary" bucket so it rolls up with the vocab task
+  startPageAttention("vocabulary");
+
+  const btn = document.getElementById("startVocab");
+  if (btn) {
+    btn.addEventListener("click", () => {
+      markInAppNavigation();               // avoid a false blur segment on nav
+      location.href = "vocab.html";
+    }, { once: true });
+  }
+}
+
+
+// vocab.html
+async function initVocab() {
+  ensureSessionOrRedirect();
+  // Count toward the vocabulary bucket
+  startPageAttention("vocabulary");
+
+  // --- Game settings ---
+  const TIME_LIMIT_MS = 60000;   // 1 minute
+  const MAX_ITEMS     = 60;       // cap display/progress at 60
+
+  // --- UI elements ---
+  const tokenEl    = qs("#token");
+  const yesBtn     = qs("#yes");
+  const noBtn      = qs("#no");
+  const timeFill   = qs("#timeFill");      // optional (may be null)
+  const doneEl     = qs("#doneCount");     // optional (may be null)
+  const accEl      = qs("#accPct");        // optional (may be null)
+  const remainingEl= qs("#remaining");     // existing element in your HTML
+
+  // Guard: required pieces
+  if (!tokenEl || !yesBtn || !noBtn) {
+    console.error("[vocab] Missing required DOM elements", { tokenEl, yesBtn, noBtn });
+    return;
+  }
+
+  // --- State ---
+  let started = false;
+  let startMs = 0;
+  let timerId = null;
+  let ended   = false;
+
+  let current = null;        // { id, token }
+  let lastShownAt = null;    // perf timing per item
+
+  let completed = 0;         // number of answered items
+  let correct   = 0;         // number answered correctly
+
+  // --- Helpers ---
+  function formatAcc() {
+    if (completed === 0) return "0%";
+    return Math.round((correct / completed) * 100) + "%";
+  }
+  function updateHUD() {
+    // New HUD (safe if elements don’t exist)
+    if (doneEl) doneEl.textContent = Math.min(completed, MAX_ITEMS);
+    if (accEl)  accEl.textContent  = formatAcc();
+    // Keep old “remaining” label in sync if present
+    if (remainingEl) remainingEl.textContent = Math.max(0, MAX_ITEMS - completed);
+  }
+  function updateTimer() {
+    if (!started) return;
+    const elapsed = Date.now() - startMs;
+    const pct = Math.max(0, Math.min(100, (elapsed / TIME_LIMIT_MS) * 100));
+    if (timeFill) timeFill.style.width = pct + "%";
+    if (elapsed >= TIME_LIMIT_MS) {
+      endGame("time");
+    }
+  }
+  function startTimer() {
+    if (started) return;
+    started = true;
+    startMs = Date.now();
+    timerId = setInterval(updateTimer, 100);
+  }
+  function stopTimer() {
+    if (timerId) clearInterval(timerId);
+    timerId = null;
+  }
+  function setButtonsEnabled(on) {
+    yesBtn.disabled = !on;
+    noBtn.disabled  = !on;
+  }
+
+  function resultMessage() {
+    const acc = completed === 0 ? 0 : Math.round((correct / completed) * 100);
+    let ending = "Thank you!";
+    if (acc >= 90) ending = "Excellent!";
+    else if (acc >= 80) ending = "Good job!";
+    else if (acc >= 70) ending = "Well done.";
+    return `Time is out. You have completed ${Math.min(completed, MAX_ITEMS)} out of 60 items in one minute. Your final accuracy rate is ${acc}%. ${ending}`;
+  }
+
+  function endGame(reason) {
+    if (ended) return;
+    ended = true;
+    stopTimer();
+    setButtonsEnabled(false);
+
+    alert(resultMessage());
+
+    // Continue to the first reading task instructions
     markInAppNavigation();
     location.href = "instructions.html?index=0";
-  });
+  }
+
+  async function ensureStarted() {
+    await api(`/api/vocab/start?session_id=${encodeURIComponent(getSession())}`, { method:"POST" });
+  }
+
+  async function loadNext() {
+    if (ended) return;
+    if (completed >= MAX_ITEMS) {
+      endGame("done");
+      return;
+    }
+    const r = await api(`/api/vocab/next?session_id=${encodeURIComponent(getSession())}`);
+    if (r.done || !r.item) {
+      endGame("exhausted");
+      return;
+    }
+    current = r.item;
+    tokenEl.textContent = current.token;
+    lastShownAt = performance.now();
+
+    // Start the timer the moment the first token is shown
+    if (!started) startTimer();
+  }
+
+  async function submit(isWord) {
+    if (ended || !current) return;
+    if (yesBtn.disabled || noBtn.disabled) return; // simple debounce
+    setButtonsEnabled(false);
+
+    const rt = Math.round(performance.now() - lastShownAt);
+
+    try {
+      const res = await api("/api/vocab/answer", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          session_id: getSession(),
+          item_id: current.id,
+          is_word: isWord,
+          rt_ms: rt
+        })
+      });
+
+      completed += 1;
+      if (res && res.correct === true) correct += 1;
+      updateHUD();
+
+      await loadNext();
+    } catch (err) {
+      console.error("[vocab] submit failed:", err);
+      alert("Network error while saving your answer. Please check your connection and try again.");
+    } finally {
+      if (!ended) setButtonsEnabled(true);
+    }
+  }
+
+  yesBtn.addEventListener("click", () => submit(true));
+  noBtn.addEventListener("click",  () => submit(false));
+
+  // Init
+  setButtonsEnabled(false);
+  try {
+    await ensureStarted();
+    await loadNext();
+  } catch (err) {
+    console.error("[vocab] init failed:", err);
+    alert("We couldn’t start the vocabulary task due to a network error. Please reload the page.");
+    return;
+  }
+  setButtonsEnabled(true);
+  updateHUD(); // initialize HUD once at start
 }
+
 
 // instructions.html
 async function initRCInstructions() {
@@ -777,74 +1000,11 @@ async function initPostTask() {
     const nextIdx = idx + 1;
     markInAppNavigation();
     if (nextIdx < assigned.length) location.href = `passage.html?index=${nextIdx}`;
-    else location.href = "vocabulary_instruction.html";
+    else location.href = "final_check.html";
   });
 
   // Kick off
   render();
-}
-
-
-
-// vocabulary_instruction.html
-async function initVocabInstruction() {
-  ensureSessionOrRedirect();
-
-  // Count this time in the "vocabulary" bucket so it rolls up with the vocab task
-  startPageAttention("vocabulary");
-
-  const btn = document.getElementById("startVocab");
-  if (btn) {
-    btn.addEventListener("click", () => {
-      markInAppNavigation();               // avoid a false blur segment on nav
-      location.href = "vocab.html";
-    }, { once: true });
-  }
-}
-
-
-// vocab.html
-async function initVocab() {
-  ensureSessionOrRedirect();
-  startPageAttention("vocabulary");
-
-  let current = null;
-  let lastShownAt = null;
-
-  async function ensureStarted() {
-    await api(`/api/vocab/start?session_id=${encodeURIComponent(getSession())}`, { method:"POST" });
-  }
-  async function loadNext() {
-    const r = await api(`/api/vocab/next?session_id=${encodeURIComponent(getSession())}`);
-    if (r.done) {
-      markInAppNavigation();
-      location.href = "final_check.html";
-      return;
-    }
-    current = r.item;
-    qs("#remaining").textContent = r.remaining;
-    qs("#token").textContent = current.token;
-    lastShownAt = performance.now();
-  }
-  qs("#yes").addEventListener("click", () => submit(true));
-  qs("#no").addEventListener("click", () => submit(false));
-
-  async function submit(isWord) {
-    const rt = Math.round(performance.now() - lastShownAt);
-    await api("/api/vocab/answer", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({
-        session_id: getSession(),
-        item_id: current.id,
-        is_word: isWord,
-        rt_ms: rt
-      })
-    });
-    await loadNext();
-  }
-
-  await ensureStarted();
-  await loadNext();
 }
 
 // final_check.html
@@ -913,12 +1073,12 @@ function bootstrap() {
   const map = {
     "consent": initConsent,
     "demographic": initDemographic,
+    "vocab_instruction": initVocabInstruction,
+    "vocab": initVocab,
     "rc_instructions": initRCInstructions,
     "passage": initPassage,
     "questions": initQuestions,
     "posttask": initPostTask,
-    "vocab_instruction": initVocabInstruction,
-    "vocab": initVocab,
     "final_check": initFinalCheck,
     "thanks": initThanks,
   };

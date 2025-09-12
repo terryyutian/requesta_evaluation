@@ -1,1 +1,1 @@
-window.API_BASE_OVERRIDE = "https://requesta-api-149255548626.us-central1.run.app";
+window.API_BASE_OVERRIDE = "http://127.0.0.1:8000";

@@ -103,15 +103,29 @@ QUESTIONS: Dict[str, List[Dict]] = {
     ],
 }
 
-# 63 vocab strings. Replace with your curated list.
+# 60 vocab strings. Replace with your curated list.
+KNOWN_WORDS = {
+    "scornful","stoutly","ablaze","moonlit","lofty","hurricane","flaw",
+    "unkempt","breeding","festivity","screech","savory","shin","fluid",
+    "allied","slain","recipient","eloquence","cleanliness","dispatch",
+    "ingenious","bewitch","plaintively","hasty","lengthy","fray","upkeep",
+    "majestic","nourishment","turmoil","carbohydrate","scholar","turtle",
+    "cylinder","censorship","celestial","rascal","muddy","listless","wrought"
+}
+
+TOKENS = [
+    "mensible","scornful","stoutly","ablaze","kermshaw","moonlit","lofty",
+    "hurricane","flaw","alberation","unkempt","breeding","festivity","screech",
+    "savory","plaudate","shin","fluid","spaunch","allied","slain","recipient",
+    "exprate","eloquence","cleanliness","dispatch","rebondicate","ingenious",
+    "bewitch","skave","plaintively","kilp","interfate","hasty","lengthy","fray",
+    "crumper","upkeep","majestic","magrity","nourishment","abergy","proom",
+    "turmoil","carbohydrate","scholar","turtle","fellick","destription",
+    "cylinder","censorship","celestial","rascal","purrage","pulsh","muddy",
+    "quirty","pudour","listless","wrought",
+]
+
 VOCAB: List[Dict] = [
-    {"id": f"v{i:02d}", "token": t}
-    for i, t in enumerate([
-        "platery","denial","generic","mensible","scornful","stoutly","ablaze","kermshaw","moonlit","lofty",
-        "hurricane","flaw","alberation","unkempt","breeding","festivity","screech","savoury","plaudate","shin",
-        "fluid","spaunch","allied","slain","recipient","exprate","eloquence","cleanliness","dispatch","rebondicate",
-        "ingenious","bewitch","skave","plaintively","kilp","interfate","hasty","lengthy","fray","crumper",
-        "upkeep","majestic","magrity","nourishment","abergy","proom","turmoil","carbohydrate","scholar","turtle",
-        "fellick","destription","cylinder","censorship","celestial","rascal","purrage","pulsh","muddy","quirty", "pudour", "listless", "wrought"
-    ], start=1)
+    {"id": f"v{i:02d}", "token": t, "is_word": (t in KNOWN_WORDS)}
+    for i, t in enumerate(TOKENS, start=1)
 ]
