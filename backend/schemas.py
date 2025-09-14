@@ -85,6 +85,7 @@ BucketName = Literal[
     "consent","demographic","reading_instruction",
     "reading_task1","survey_task1",
     "reading_task2","survey_task2",
+    "reading_task3","survey_task3",
     "vocabulary"
 ]
 
