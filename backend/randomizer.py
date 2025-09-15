@@ -1,27 +1,25 @@
+# backend/randomizer.py
 import random
 from typing import List
 from data import PASSAGES, QUESTIONS
 
+def _has_six_any(pid: str) -> bool:
+    node = QUESTIONS.get(pid) or {}
+    qdict = node.get("questions") or {}
+    # consider either source sufficient for this placeholder logic
+    for src in ("baseline", "requesta"):
+        lst = qdict.get(src) or []
+        if isinstance(lst, list) and len(lst) >= 6:
+            return True
+    return False
+
 def random_two_passages(seed: int | None = None) -> List[str]:
     """
     Placeholder randomization function.
-    Randomly picks 2 distinct passage IDs that both have 5 MCQs.
+    Randomly picks 2 distinct passage IDs that have at least 6 MCQs
+    in either baseline or requesta.
     """
     rng = random.Random(seed)
-    candidates = [pid for pid in PASSAGES.keys() if len(QUESTIONS.get(pid, [])) >= 5]
+    candidates = [pid for pid in PASSAGES.keys() if _has_six_any(pid)]
     rng.shuffle(candidates)
     return candidates[:2]
-
-def maybe_shuffle_choices(questions: list, seed: int | None = None) -> list:
-    """
-    Optional: shuffle choice order per session.
-    """
-    rng = random.Random(seed)
-    shuffled = []
-    for q in questions:
-        choices = q["choices"][:]
-        rng.shuffle(choices)
-        # adjust correct id if shuffling does not preserve id meaning
-        # here, choice ids remain attached; no change needed
-        shuffled.append({**q, "choices": choices})
-    return shuffled

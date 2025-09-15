@@ -44,6 +44,15 @@ class QuestionsResponse(BaseModel):
     passage_id: str
     questions: List[Question]
 
+class PublicQuestion(BaseModel):
+    id: str
+    prompt: str
+    choices: List[Choice]
+
+class PublicQuestionsResponse(BaseModel):
+    passage_id: str
+    questions: List[PublicQuestion]
+
 class SubmitMCQPayload(BaseModel):
     session_id: str
     passage_id: str
