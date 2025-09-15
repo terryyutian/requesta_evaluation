@@ -1,11 +1,14 @@
 # backend/main.py
 from fastapi import FastAPI, HTTPException, Body, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from typing import Any, Dict, List, Optional
 import hashlib
 import random
 import os
 import httpx
+from pathlib import Path
+
 
 from schemas import (
     SessionStartRequest,
@@ -36,17 +39,17 @@ DEV_BYPASS_RECAPTCHA = os.getenv("DEV_BYPASS_RECAPTCHA", "0").strip() == "1"
 app = FastAPI(title="Study Data Collection API", version=APP_VERSION)
 
 # --- CORS ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
-        "http://localhost:8000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=[
+#         "http://127.0.0.1:5500",
+#         "http://localhost:5500",
+#         "http://localhost:8000",
+#     ],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Utilities
@@ -132,69 +135,53 @@ def _assign_sources_for_three(passage_ids: List[str], seed: Optional[int] = None
 # ──────────────────────────────────────────────────────────────────────────────
 # Demographics normalizer (v2: supports new Q4/Q5 + renumbered L2 block)
 # ──────────────────────────────────────────────────────────────────────────────
-
+# backend/main.py (normalize_demographics_v2)
 def normalize_demographics_v2(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Make the demographics payload consistent and analysis-friendly
-    without requiring a rigid schema.
-    - q4_hispanic: string as-is (trimmed)
-    - q5_race: always a list[str]
-    - q5_race_other: only kept if "Other" is selected
-    - L2 gating: if q7_english_first == "Yes", drop q8–q11
-    - Coerce obvious numbers; preserve decimals for years_* fields
-    - Map q6_education -> education
-    """
     out = dict(data)
 
-    # Normalize q4 (hispanic/latino)
-    if "q4_hispanic" in out and isinstance(out["q4_hispanic"], str):
-        out["q4_hispanic"] = out["q4_hispanic"].strip()
+    # Q4: accept either field name, prefer normalized 'q4_hispanic'
+    q4 = out.get("q4_hispanic_origin", out.get("q4_hispanic"))
+    if isinstance(q4, str): q4 = q4.strip()
+    out["q4_hispanic"] = q4
+    out.pop("q4_hispanic_origin", None)
 
-    # Normalize q5 (race multi-select)
+    # Q5 race (existing logic kept)
     races = out.get("q5_race")
-    if races is None:
-        out["q5_race"] = []
-    elif isinstance(races, str):
-        out["q5_race"] = [races]
-    elif isinstance(races, list):
-        out["q5_race"] = [str(x) for x in races if x is not None]
-    else:
-        out["q5_race"] = [str(races)]
-
-    # Keep 'Other (please specify)' text only if Other is selected
-    if "Other" not in out.get("q5_race", []):
+    if races is None: out["q5_race"] = []
+    elif isinstance(races, str): out["q5_race"] = [races]
+    elif isinstance(races, list): out["q5_race"] = [str(x) for x in races if x is not None]
+    else: out["q5_race"] = [str(races)]
+    if "Other" not in out["q5_race"]:
         out.pop("q5_race_other", None)
 
-    # L2 gating
+    # L2 gating (existing)
     if str(out.get("q7_english_first", "")).strip().lower() == "yes":
-        for k in ("q8_native_language", "q9_start_age", "q10_years_studied", "q11_years_in_us"):
+        for k in ("q8_native_language","q9_start_age","q10_years_studied","q11_years_in_us"):
             out.pop(k, None)
 
-    # Numeric coercion
-    def _to_int(name: str):
+    # Coercions
+    def _as_int(name): 
         if name in out and out[name] not in (None, ""):
-            try:
-                out[name] = int(out[name])
-            except Exception:
-                pass
-
-    def _to_float(name: str):
+            try: out[name] = int(out[name])
+            except: pass
+    def _as_float(name):
         if name in out and out[name] not in (None, ""):
-            try:
-                out[name] = float(out[name])
-            except Exception:
-                pass
+            try: out[name] = float(out[name])
+            except: pass
+    _as_int("q1_age"); _as_int("q9_start_age")
+    _as_float("q10_years_studied"); _as_float("q11_years_in_us")
 
-    _to_int("q1_age")
-    _to_int("q9_start_age")
-    _to_float("q10_years_studied")
-    _to_float("q11_years_in_us")
-
-    # Map education to canonical key
-    if "q6_education" in out:
-        out["education"] = out.get("q6_education")
+    # Canonical mirrors (helpful downstream)
+    out["age"] = out.get("q1_age")
+    out["gender"] = out.get("q2_gender")
+    out["education"] = out.get("q6_education")
+    if str(out.get("q7_english_first","")).strip().lower() == "yes":
+        out["first_language"] = "English"
+    else:
+        out["first_language"] = (out.get("q8_native_language") or "").strip() or None
 
     return out
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Health
@@ -519,3 +506,18 @@ def log_rc_event(payload: RCEventPayload):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "start_time": rec["start_time"], "server_ts": rec["server_ts"]}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Static frontend (serve / -> frontend/index.html and other assets)
+# Place this AFTER API routes so /api/* keeps working.
+# ──────────────────────────────────────────────────────────────────────────────
+
+FRONTEND_DIR = (Path(__file__).resolve().parent.parent / "frontend").resolve()
+if not FRONTEND_DIR.exists():
+    # Fail fast if the directory isn't where we expect it.
+    # (You can downgrade this to a warning if you prefer.)
+    raise RuntimeError(f"frontend folder not found at {FRONTEND_DIR}")
+
+# html=True makes "/" serve index.html and enables directory index serving
+app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

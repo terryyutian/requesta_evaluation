@@ -1,1 +1,2 @@
-window.API_BASE_OVERRIDE = "http://127.0.0.1:8000";
+window.API_BASE_OVERRIDE = "";
+window.RECAPTCHA_SITE_KEY = "6Le7lsorAAAAAMRZfOrqg8rQqF8T9KrnfqjdpnYQ";  // from Google admin console
