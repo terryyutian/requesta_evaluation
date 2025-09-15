@@ -4,12 +4,11 @@ a web application built to collect data for ReQUESTA evaluation
 ```bash
 
 python -m venv .venv && source .venv/scripts/activate
-pip install -e .
-
 
 # terminal 1
+# run the backend
 cd backend
-
+pip install -r requirements.txt
 uvicorn main:app --reload
 
 # terminal 2 (static hosting for convenience)

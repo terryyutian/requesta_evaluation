@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Vocabulary Instructions</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* Optional: small layout polish for this page only */
+    .card h1 { margin-bottom: 8px; }
+    .section { margin-top: 14px; }
+    .section h3 { margin: 0 0 6px 0; }
+    .bullets { margin: 0; padding-left: 18px; }
+    .bullets li { margin: 4px 0; }
+    .note { font-size: 0.95em; color: var(--muted, #8aa0b4); }
+  </style>
+</head>
+<body data-page="vocab_instruction">
+  <div class="container">
+    <div class="card">
+      <div class="badge">Vocabulary</div>
+      <h1>Vocabulary Decision <span class="note">— Game Instructions</span></h1>
+
+      <div class="section">
+        <h3>Objective</h3>
+        <p>Decide <strong>as quickly and accurately as possible</strong> whether each letter string is a real English word.</p>
+      </div>
+
+      <div class="section">
+        <h3>How to Play</h3>
+        <ul class="bullets">
+          <li>You will see <strong>60 items</strong>, one at a time.</li>
+          <li>Click <strong>“Yes”</strong> if it <em>is</em> a real English word.</li>
+          <li>Click <strong>“No”</strong> if it is <em>not</em> a real English word.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Time &amp; Results</h3>
+        <ul class="bullets">
+          <li>You have <strong>1 minute total</strong>. The timer starts when you press <code>Start</code>.</li>
+          <li>Try to complete as many items as you can while staying accurate.</li>
+          <li>Your <strong>completion count</strong> and <strong>accuracy rate</strong> will be reported during and after the game.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Ready?</h3>
+        <p>If everything is clear, press <code>Start</code> to begin.</p>
+      </div>
+
+      <div class="right" style="margin-top:16px;">
+        <button id="startVocab">Start →</button>
+      </div>
+    </div>
+  </div>
+  <script src="config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

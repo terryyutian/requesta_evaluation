@@ -34,47 +34,58 @@
             <li><label class="option-row"><input type="radio" name="q2_gender" value="Prefer not to say"><span>Prefer not to say</span></label></li>
           </ul>
         </fieldset>
-              
-      <!-- Q3 -->
-      <fieldset>
-        <legend><strong>Q3:</strong> What is your country (or countries) of citizenship? <em>(Select all that apply)</em></legend>
 
-        <details id="citizenshipDropdown" class="dropdown">
-          <summary class="dropdown-summary" tabindex="0">
-            <span id="citizenshipDisplay" class="dropdown-display placeholder">Select countries…</span>
-            <span id="citizenshipSummary" class="muted">(0 selected)</span>
-          </summary>
-          <div class="dropdown-panel">
-            <input type="text" id="citizenshipSearch" placeholder="Search countries…" />
-            <ul id="citizenshipOptions" class="options scroll"></ul>
-            <div class="right" style="margin-top:8px;">
-              <button type="button" id="citizenshipClose" class="secondary">Done</button>
+        <!-- Q3 -->
+        <fieldset>
+          <legend><strong>Q3:</strong> What is your country (or countries) of citizenship? <em>(Select all that apply)</em></legend>
+
+          <details id="citizenshipDropdown" class="dropdown">
+            <summary class="dropdown-summary" tabindex="0">
+              <span id="citizenshipDisplay" class="dropdown-display placeholder">Select countries…</span>
+              <span id="citizenshipSummary" class="muted">(0 selected)</span>
+            </summary>
+            <div class="dropdown-panel">
+              <input type="text" id="citizenshipSearch" placeholder="Search countries…" />
+              <ul id="citizenshipOptions" class="options scroll"></ul>
+              <div class="right" style="margin-top:8px;">
+                <button type="button" id="citizenshipClose" class="secondary">Done</button>
+              </div>
             </div>
-          </div>
-        </details>
-      </fieldset>
-
-
+          </details>
+        </fieldset>
 
         <!-- Q4 -->
         <fieldset>
-          <legend><strong>Q4:</strong> Which race / ethnicity best describes you?</legend>
+          <legend><strong>Q4:</strong> Are you of Hispanic or Latino origin?</legend>
           <ul class="options">
-            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="American Indian or Alaska Native" required><span>American Indian or Alaska Native</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Asian"><span>Asian</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Black or African American"><span>Black or African American</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Hispanic or Latino"><span>Hispanic or Latino</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Native Hawaiian or Pacific Islander"><span>Native Hawaiian or Pacific Islander</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="White"><span>White</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q4_ethnicity" value="Multiple ethnicity / Other"><span>Multiple ethnicity / Other (please specify)</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q4_hispanic_origin" value="Yes, Hispanic or Latino" required><span>Yes, Hispanic or Latino</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q4_hispanic_origin" value="No, not Hispanic or Latino"><span>No, not Hispanic or Latino</span></label></li>
           </ul>
-          <input name="q4_ethnicity_other" placeholder="If other, please specify" style="margin-top:8px;" />
         </fieldset>
 
         <!-- Q5 -->
         <fieldset>
-          <legend><strong>Q5:</strong> Highest degree or level completed</legend>
-          <select name="q5_education" required>
+          <legend><strong>Q5:</strong> What is your race? <em>(Select all that apply)</em></legend>
+          <ul class="options">
+            <li><label class="option-row"><input type="checkbox" name="q5_race" value="American Indian or Alaska Native"><span>American Indian or Alaska Native</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="q5_race" value="Asian"><span>Asian</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="q5_race" value="Black or African American"><span>Black or African American</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="q5_race" value="Native Hawaiian or Other Pacific Islander"><span>Native Hawaiian or Other Pacific Islander</span></label></li>
+            <li><label class="option-row"><input type="checkbox" name="q5_race" value="White"><span>White</span></label></li>
+            <li>
+              <label class="option-row">
+                <input type="checkbox" name="q5_race" value="Other">
+                <span>Other (please specify)</span>
+              </label>
+              <input name="q5_race_other" placeholder="If other, please specify" style="margin-top:8px;" />
+            </li>
+          </ul>
+        </fieldset>
+
+        <!-- Q6 -->
+        <fieldset>
+          <legend><strong>Q6:</strong> Highest degree or level completed</legend>
+          <select name="q6_education" required>
             <option value="" selected disabled>Choose one...</option>
             <option>No schooling completed</option>
             <option>Nursery school to 8th grade</option>
@@ -90,61 +101,59 @@
           </select>
         </fieldset>
 
-        <!-- Q6 -->
-      <fieldset>
-        <legend><strong>Q6:</strong> Is English your first language?</legend>
-        <ul class="options">
-          <li><label class="option-row"><input type="radio" name="q6_english_first" value="Yes" required><span>Yes</span></label></li>
-          <li><label class="option-row"><input type="radio" name="q6_english_first" value="No"><span>No</span></label></li>
-        </ul>
-        <p class="badge">If “Yes”, you may skip Q7–Q10.</p>
-      </fieldset>
-
-      <!-- Q7–Q10 (mounted only when Q6 = No) -->
-      <template id="l2-template">
-        <fieldset id="l2-block">
-          <legend><strong>Q7–Q10:</strong> If English is not your first language</legend>
-          <label class="option-row">Q7: Native/first language (not English)
-            <input name="q7_native_language" />
-          </label>
-          <label class="option-row">Q8: At what age did you start learning English? (number only)
-            <input name="q8_start_age" type="number" min="0" step="1" inputmode="numeric" />
-          </label>
-          <label class="option-row">Q9: How many years have you studied English? (e.g., 8.5)
-            <input name="q9_years_studied" type="number" min="0" step="0.1" inputmode="decimal" />
-          </label>
-          <label class="option-row">Q10: How many years have you been in the U.S.? (e.g., 2)
-            <input name="q10_years_in_us" type="number" min="0" step="0.1" inputmode="decimal" />
-          </label>
-        </fieldset>
-      </template>
-      <!-- mount point where Q7–Q10 will be inserted -->
-      <div id="l2-mount"></div>
-
-
-
-        <!-- Q11 -->
+        <!-- Q7 -->
         <fieldset>
-          <legend><strong>Q11:</strong> I enjoy reading</legend>
+          <legend><strong>Q7:</strong> Is English your first language?</legend>
           <ul class="options">
-            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="1" required><span>1 - Strongly Disagree</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="2"><span>2 - Disagree</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="3"><span>3 - Somewhat Disagree</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="4"><span>4 - Somewhat Agree</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="5"><span>5 - Agree</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q11_reading_enjoyment" value="6"><span>6 - Strongly Agree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q7_english_first" value="Yes" required><span>Yes</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q7_english_first" value="No"><span>No</span></label></li>
           </ul>
+          <p class="badge">If “Yes”, you may skip Q8–Q11.</p>
         </fieldset>
-        
+
+        <!-- Q8–Q11 (mounted only when Q7 = No) -->
+        <template id="l2-template">
+          <fieldset id="l2-block">
+            <legend><strong>Q8–Q11:</strong> If English is not your first language</legend>
+            <label class="option-row">Q8: Native/first language (not English)
+              <input name="q8_native_language" />
+            </label>
+            <label class="option-row">Q9: At what age did you start learning English? (number only)
+              <input name="q9_start_age" type="number" min="0" step="1" inputmode="numeric" />
+            </label>
+            <label class="option-row">Q10: How many years have you studied English? (e.g., 8.5)
+              <input name="q10_years_studied" type="number" min="0" step="0.1" inputmode="decimal" />
+            </label>
+            <label class="option-row">Q11: How many years have you been in the U.S.? (e.g., 2)
+              <input name="q11_years_in_us" type="number" min="0" step="0.1" inputmode="decimal" />
+            </label>
+          </fieldset>
+        </template>
+        <!-- mount point where Q8–Q11 will be inserted -->
+        <div id="l2-mount"></div>
+
         <!-- Q12 -->
         <fieldset>
-          <legend><strong>Q12:</strong> Hours per week you read </legend>
+          <legend><strong>Q12:</strong> I enjoy reading</legend>
           <ul class="options">
-            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="None" required><span>None</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="Less than 1 hour"><span>Less than 1 hour</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="1-2 hours"><span>1–2 hours</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="3-4 hours"><span>3–4 hours</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q12_reading_hours" value="5 or more hours"><span>5 or more hours</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_enjoyment" value="1" required><span>1 - Strongly Disagree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_enjoyment" value="2"><span>2 - Disagree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_enjoyment" value="3"><span>3 - Somewhat Disagree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_enjoyment" value="4"><span>4 - Somewhat Agree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_enjoyment" value="5"><span>5 - Agree</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q12_reading_enjoyment" value="6"><span>6 - Strongly Agree</span></label></li>
+          </ul>
+        </fieldset>
+
+        <!-- Q13 -->
+        <fieldset>
+          <legend><strong>Q13:</strong> Hours per week you read</legend>
+          <ul class="options">
+            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="None" required><span>None</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="Less than 1 hour"><span>Less than 1 hour</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="1-2 hours"><span>1–2 hours</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="3-4 hours"><span>3–4 hours</span></label></li>
+            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="5 or more hours"><span>5 or more hours</span></label></li>
           </ul>
         </fieldset>
 
@@ -155,9 +164,8 @@
     </div>
   </div>
 
-<link rel="stylesheet" href="styles.css" />
-<script src="config.js"></script>
-<script src="js/app.js"></script>
-
+  <link rel="stylesheet" href="styles.css" />
+  <script src="config.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
