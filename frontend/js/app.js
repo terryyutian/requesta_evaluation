@@ -194,8 +194,35 @@ function startPageAttention(bucket, rcMeta, warnOnReturnMs = null) {
 const DEBUG_MODE = new URLSearchParams(location.search).has("debug");
 if (!DEBUG_MODE) installGuards();
 
+/* =========================
+   reCAPTCHA helpers (v2)
+   ========================= */
+function recaptchaEnabled() {
+  return !!(typeof window !== "undefined" && window.RECAPTCHA_SITE_KEY && String(window.RECAPTCHA_SITE_KEY).trim());
+}
+let RECAPTCHA_READY = false;
+window.onRecaptchaLoad = function () {
+  RECAPTCHA_READY = true;
+  renderRecaptchaWidgets();
+};
+function renderRecaptchaWidgets() {
+  if (!recaptchaEnabled() || !RECAPTCHA_READY || typeof grecaptcha === "undefined") return;
+  document.querySelectorAll('[data-recaptcha="widget"]:not([data-rendered="1"])').forEach((el) => {
+    const wid = grecaptcha.render(el, { sitekey: window.RECAPTCHA_SITE_KEY });
+    el.setAttribute("data-rendered", "1");
+    el.setAttribute("data-widget-id", String(wid));
+  });
+}
+function getRecaptchaTokenFromForm(formEl) {
+  if (!formEl) return null;
+  const t = formEl.querySelector('textarea[name="g-recaptcha-response"]');
+  return (t && t.value && t.value.trim()) ? t.value.trim() : null;
+}
 
-// --- Page controllers ---
+/* =========================
+   Page controllers
+   ========================= */
+
 // consent.html
 async function initConsent() {
   startPageAttention("consent");
@@ -219,14 +246,12 @@ async function initConsent() {
         body: JSON.stringify({ source: "web", consent: true })
       });
       setSession(r.session_id);
+      thanksBox.style.display = "block";
+      nextBtn.focus();
     } catch (err) {
       console.error("[consent] session start failed:", err);
       alert("Couldn’t start your session. Please check the API is running and try again.");
-      agreeBtn.disabled = false;
-      return; // don’t proceed without a real server session
     } finally {
-      thanksBox.style.display = "block";
-      nextBtn.focus();
       agreeBtn.disabled = false;
     }
   }, { once: true });
@@ -239,11 +264,10 @@ async function initConsent() {
   });
 }
 
-
 // demographic.html
-
 async function initDemographic() {
   startPageAttention("demographic");
+  renderRecaptchaWidgets(); // render if script is ready (or later via onload)
 
   // --- Q7 → L2 (Q8–Q11) gating ---
   const L2_FIELDS = ["q8_native_language","q9_start_age","q10_years_studied","q11_years_in_us"];
@@ -314,7 +338,7 @@ async function initDemographic() {
     if (e.target?.name === "q7_english_first") syncL2({});
   });
 
-// Toggle “Other race” textbox visibility (matches the new HTML names)
+  // Toggle “Other race” textbox visibility
   const otherBox  = document.querySelector('input[name="q5_race"][value="Other"]');
   const otherText = document.querySelector('input[name="q5_race_other"]');
   if (otherBox && otherText) {
@@ -327,10 +351,9 @@ async function initDemographic() {
     toggle(); // initialize
   }
   
-   // --- the rest of initDemographic() ---
   ensureSessionOrRedirect();
 
-  // Dropdown plumbing for Q3 (citizenship) — unchanged
+  // Dropdown plumbing for Q3 (citizenship)
   const COUNTRIES = [
     "United States of America","Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria",
     "Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan",
@@ -444,6 +467,15 @@ async function initDemographic() {
           delete payload.q11_years_in_us;
         }
 
+        // reCAPTCHA token (required only if site key configured)
+        renderRecaptchaWidgets();
+        const rToken = getRecaptchaTokenFromForm(form);
+        if (recaptchaEnabled() && !rToken) {
+          alert("Please complete the reCAPTCHA box before continuing.");
+          return;
+        }
+        payload.recaptcha_token = rToken || null;
+
         // 1) Demographics
         await api(`/api/demographics?session_id=${encodeURIComponent(getSession())}`, {
           method: "POST",
@@ -468,8 +500,6 @@ async function initDemographic() {
   }
 }
 
-
-
 // vocabulary_instruction.html
 async function initVocabInstruction() {
   ensureSessionOrRedirect();
@@ -485,7 +515,6 @@ async function initVocabInstruction() {
   }
 }
 
-
 // vocab.html
 async function initVocab() {
   ensureSessionOrRedirect();
@@ -493,7 +522,7 @@ async function initVocab() {
 
   // --- Game settings ---
   const TIME_LIMIT_MS = 60000;   // 1 minute
-  const MAX_ITEMS     = 60;       // cap display/progress at 60
+  let   MAX_ITEMS     = 60;      // will be overwritten by server size if available
 
   // --- UI elements ---
   const tokenEl    = qs("#token");
@@ -502,9 +531,8 @@ async function initVocab() {
   const timeFill   = qs("#timeFill");      // optional (may be null)
   const doneEl     = qs("#doneCount");     // optional (may be null)
   const accEl      = qs("#accPct");        // optional (may be null)
-  const remainingEl= qs("#remaining");     // existing element in your HTML
+  const remainingEl= qs("#remaining");     // optional (may be null)
 
-  // Guard: required pieces
   if (!tokenEl || !yesBtn || !noBtn) {
     console.error("[vocab] Missing required DOM elements", { tokenEl, yesBtn, noBtn });
     return;
@@ -522,7 +550,6 @@ async function initVocab() {
   let completed = 0;         // number of answered items
   let correct   = 0;         // number answered correctly
 
-  // --- Helpers ---
   function formatAcc() {
     if (completed === 0) return "0%";
     return Math.round((correct / completed) * 100) + "%";
@@ -538,7 +565,7 @@ async function initVocab() {
     const pct = Math.max(0, Math.min(100, (elapsed / TIME_LIMIT_MS) * 100));
     if (timeFill) timeFill.style.width = pct + "%";
     if (elapsed >= TIME_LIMIT_MS) {
-      endGame("time");
+      endGame();
     }
   }
   function startTimer() {
@@ -562,7 +589,7 @@ async function initVocab() {
     if (acc >= 90) ending = "Excellent!";
     else if (acc >= 80) ending = "Good job!";
     else if (acc >= 70) ending = "Well done.";
-    return `Time is out. You have completed ${Math.min(completed, MAX_ITEMS)} out of 60 items in one minute. Your final accuracy rate is ${acc}%. ${ending}`;
+    return `Time is out. You have completed ${Math.min(completed, MAX_ITEMS)} out of ${MAX_ITEMS} items in one minute. Your final accuracy rate is ${acc}%. ${ending}`;
   }
 
   function endGame() {
@@ -578,7 +605,8 @@ async function initVocab() {
   }
 
   async function ensureStarted() {
-    await api(`/api/vocab/start?session_id=${encodeURIComponent(getSession())}`, { method:"POST" });
+    const r = await api(`/api/vocab/start?session_id=${encodeURIComponent(getSession())}`, { method:"POST" });
+    if (typeof r?.size === "number" && r.size > 0) MAX_ITEMS = r.size;
   }
 
   async function loadNext() {
@@ -646,7 +674,6 @@ async function initVocab() {
   setButtonsEnabled(true);
   updateHUD();
 }
-
 
 // instructions.html
 async function initRCInstructions() {
@@ -744,7 +771,6 @@ async function initPassage() {
   }
 }
 
-
 // questions.html
 async function initQuestions() {
   ensureSessionOrRedirect();
@@ -756,7 +782,14 @@ async function initQuestions() {
   if (!pid) { location.href = "consent.html"; return; }
 
   // Fetch questions FIRST
-  const payload = await api(`/api/questions/${encodeURIComponent(pid)}?session_id=${encodeURIComponent(getSession())}`);
+  let payload;
+  try {
+    payload = await api(`/api/questions/${encodeURIComponent(pid)}?session_id=${encodeURIComponent(getSession())}`);
+  } catch (err) {
+    console.error("[questions] fetch failed:", err);
+    alert("We couldn’t load the questions due to a network error. Please reload.");
+    return;
+  }
   const total = payload.questions.length;
   const q = payload.questions[qidx];
   if (!q) { location.href = `questions.html?index=${idx}&q=0`; return; }
@@ -898,7 +931,6 @@ async function initQuestions() {
   });
 }
 
-
 // posttask.html
 async function initPostTask() {
   ensureSessionOrRedirect();
@@ -1036,10 +1068,10 @@ async function initPostTask() {
   render();
 }
 
-
 // final_check.html
 async function initFinalCheck() {
   ensureSessionOrRedirect();
+  renderRecaptchaWidgets(); // render if ready
 
   const form = document.getElementById("final-form");
   const toolsBlock = document.getElementById("tools-block");
@@ -1082,7 +1114,15 @@ async function initFinalCheck() {
         if (!hasAny) { alert("Please select at least one tool you used or specify it in 'Other'."); return; }
       }
 
-      const payload = { used_ai_tools: used, tools, other_tool: other };
+      // reCAPTCHA token (required only if site key configured)
+      renderRecaptchaWidgets();
+      const rToken = getRecaptchaTokenFromForm(form);
+      if (recaptchaEnabled() && !rToken) {
+        alert("Please complete the reCAPTCHA box before continuing.");
+        return;
+      }
+
+      const payload = { used_ai_tools: used, tools, other_tool: other, recaptcha_token: rToken || null };
       await api(`/api/final_check?session_id=${encodeURIComponent(getSession())}`, {
         method: "POST",
         headers: {"Content-Type":"application/json"},

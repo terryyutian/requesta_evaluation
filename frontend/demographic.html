@@ -4,6 +4,10 @@
   <meta charset="utf-8" />
   <title>Demographic Survey</title>
   <link rel="stylesheet" href="styles.css" />
+  <script src="config.js"></script>
+  <!-- Explicit rendering so we can set the site key from config.js -->
+  <script src="https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit" async defer></script>
+  <script src="js/app.js" defer></script>
 </head>
 <body data-page="demographic">
   <div class="container">
@@ -129,7 +133,6 @@
             </label>
           </fieldset>
         </template>
-        <!-- mount point where Q8–Q11 will be inserted -->
         <div id="l2-mount"></div>
 
         <!-- Q12 -->
@@ -145,16 +148,10 @@
           </ul>
         </fieldset>
 
-        <!-- Q13 -->
+        <!-- reCAPTCHA -->
         <fieldset>
-          <legend><strong>Q13:</strong> Hours per week you read</legend>
-          <ul class="options">
-            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="None" required><span>None</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="Less than 1 hour"><span>Less than 1 hour</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="1-2 hours"><span>1–2 hours</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="3-4 hours"><span>3–4 hours</span></label></li>
-            <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="5 or more hours"><span>5 or more hours</span></label></li>
-          </ul>
+          <legend><strong>Verify you’re human</strong></legend>
+          <div class="recaptcha" data-recaptcha="widget"></div>
         </fieldset>
 
         <div class="right">
@@ -163,9 +160,5 @@
       </form>
     </div>
   </div>
-
-  <link rel="stylesheet" href="styles.css" />
-  <script src="config.js"></script>
-  <script src="js/app.js"></script>
 </body>
 </html>

@@ -1,7 +1,5 @@
 from typing import Dict, List
 
-# --- PLACEHOLDER DATA ---
-# Replace with your actual passages, questions, and vocabulary list.
 
 PASSAGES = {
     'p1': {
