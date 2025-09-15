@@ -1,16 +1,19 @@
 # backend/main.py
-from fastapi import FastAPI, HTTPException, Body, Query
+from fastapi import FastAPI, HTTPException, Body, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Any, Dict, List, Optional
 import hashlib
 import random
+import os
+import httpx
 
 from schemas import (
     SessionStartRequest,
     SessionStartResponse,
+    DemographicsPayload,
     RandomizeResponse,
     Passage,
-    QuestionsResponse,
+    PublicQuestionsResponse,  # <- public (no answers)
     SubmitMCQPayload,
     MCQSubmitResult,
     PostTaskFeedbackPayload,
@@ -25,8 +28,12 @@ from security import new_session_id
 from data import PASSAGES, QUESTIONS, VOCAB
 import storage
 
+APP_VERSION = "0.3.0"
+RECAPTCHA_SECRET = os.getenv("RECAPTCHA_SECRET", "").strip()
+RECAPTCHA_MODE = (os.getenv("RECAPTCHA_MODE") or "auto").strip().lower()
+DEV_BYPASS_RECAPTCHA = os.getenv("DEV_BYPASS_RECAPTCHA", "0").strip() == "1"
 
-app = FastAPI(title="Study Data Collection API", version="0.3.0")
+app = FastAPI(title="Study Data Collection API", version=APP_VERSION)
 
 # --- CORS ---
 app.add_middleware(
@@ -41,15 +48,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Utilities
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _recaptcha_required() -> bool:
+    if RECAPTCHA_MODE in ("disabled", "off", "false", "0"):
+        return False
+    if RECAPTCHA_MODE in ("required", "on", "true", "1"):
+        return True
+    # auto
+    return bool(RECAPTCHA_SECRET)
+
+async def verify_recaptcha_v2(token: str, remote_ip: str | None = None) -> bool:
+    # Dev bypass if not required
+    if not _recaptcha_required():
+        return True
+    if not RECAPTCHA_SECRET or not token:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(
+                "https://www.google.com/recaptcha/api/siteverify",
+                data={
+                    "secret": RECAPTCHA_SECRET,
+                    "response": token,
+                    **({"remoteip": remote_ip} if remote_ip else {}),
+                },
+            )
+        data = r.json()
+        return bool(data.get("success") is True)
+    except Exception:
+        return False
+
+
 def _sha_seed(text: str) -> int:
     """Stable seed from an arbitrary string (session_id)."""
     return int(hashlib.sha256(text.encode("utf-8")).hexdigest(), 16) % (2**31)
-
 
 def _has_two_sources(pkey: str) -> bool:
     """True if passage has both 'baseline' and 'requesta' with >= 6 questions each."""
@@ -66,23 +101,19 @@ def _has_two_sources(pkey: str) -> bool:
     except Exception:
         return False
 
-
 def _random_three_passages(seed: Optional[int] = None) -> List[str]:
     """
     Deterministically pick 3 distinct passage KEYS (e.g., 'p1', 'p2', ...)
     that exist in PASSAGES and QUESTIONS, preferring those that have both sources.
     """
     rng = random.Random(seed)
-
     preferred = [pid for pid in PASSAGES.keys() if pid in QUESTIONS and _has_two_sources(pid)]
     fallback  = [pid for pid in PASSAGES.keys() if pid in QUESTIONS]
-
     pool = preferred if len(preferred) >= 3 else fallback
     if len(pool) < 3:
         raise HTTPException(status_code=500, detail="Not enough passages available.")
     rng.shuffle(pool)
     return pool[:3]
-
 
 def _assign_sources_for_three(passage_ids: List[str], seed: Optional[int] = None) -> Dict[str, str]:
     """
@@ -98,7 +129,6 @@ def _assign_sources_for_three(passage_ids: List[str], seed: Optional[int] = None
     rng.shuffle(ids)
     return {ids[0]: majority, ids[1]: majority, ids[2]: minority}
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Demographics normalizer (v2: supports new Q4/Q5 + renumbered L2 block)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -111,7 +141,8 @@ def normalize_demographics_v2(data: Dict[str, Any]) -> Dict[str, Any]:
     - q5_race: always a list[str]
     - q5_race_other: only kept if "Other" is selected
     - L2 gating: if q7_english_first == "Yes", drop q8–q11
-    - Coerce obvious numbers where provided
+    - Coerce obvious numbers; preserve decimals for years_* fields
+    - Map q6_education -> education
     """
     out = dict(data)
 
@@ -134,12 +165,12 @@ def normalize_demographics_v2(data: Dict[str, Any]) -> Dict[str, Any]:
     if "Other" not in out.get("q5_race", []):
         out.pop("q5_race_other", None)
 
-    # L2 gating (note the renumbered block starts at q7_english_first)
+    # L2 gating
     if str(out.get("q7_english_first", "")).strip().lower() == "yes":
         for k in ("q8_native_language", "q9_start_age", "q10_years_studied", "q11_years_in_us"):
             out.pop(k, None)
 
-    # Light numeric coercion (ignore errors)
+    # Numeric coercion
     def _to_int(name: str):
         if name in out and out[name] not in (None, ""):
             try:
@@ -147,11 +178,23 @@ def normalize_demographics_v2(data: Dict[str, Any]) -> Dict[str, Any]:
             except Exception:
                 pass
 
-    for n in ("q1_age", "q9_start_age", "q10_years_studied", "q11_years_in_us"):
-        _to_int(n)
+    def _to_float(name: str):
+        if name in out and out[name] not in (None, ""):
+            try:
+                out[name] = float(out[name])
+            except Exception:
+                pass
+
+    _to_int("q1_age")
+    _to_int("q9_start_age")
+    _to_float("q10_years_studied")
+    _to_float("q11_years_in_us")
+
+    # Map education to canonical key
+    if "q6_education" in out:
+        out["education"] = out.get("q6_education")
 
     return out
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Health
@@ -159,8 +202,7 @@ def normalize_demographics_v2(data: Dict[str, Any]) -> Dict[str, Any]:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
-
+    return {"ok": True, "version": APP_VERSION}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Session & Consent
@@ -174,22 +216,31 @@ def session_start(req: SessionStartRequest):
     storage.start_session(sid, source=req.source)
     return SessionStartResponse(session_id=sid)
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Demographics (JSON blob; future-proof)
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/demographics")
-def submit_demographics(
+async def submit_demographics(
+    request: Request,
     payload: Dict[str, Any] = Body(...),
-    session_id: str = Query(...)
+    session_id: str = "",
 ):
-    if session_id not in storage.SESSIONS:
+    if not storage.session_exists(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
-    normalized = normalize_demographics_v2(payload)
-    storage.save_demographics(session_id, normalized)  # store JSON dict
-    return {"ok": True}
 
+    token = (payload.get("recaptcha_token") or "").strip()
+    remote_ip = request.client.host if request.client else None
+    ok = await verify_recaptcha_v2(token, remote_ip)
+    storage.mark_recaptcha_result(session_id, "demographics", ok)
+    if not ok:
+        raise HTTPException(status_code=400, detail="reCAPTCHA failed")
+
+    # sanitize/validate and persist
+    normalized = normalize_demographics_v2(payload)
+    model = DemographicsPayload(**normalized)
+    storage.save_demographics(session_id, model.model_dump(), recaptcha_verification="yes")
+    return {"ok": True}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Random assignment (3 passages + 2:1 source split, deterministic per session)
@@ -197,7 +248,7 @@ def submit_demographics(
 
 @app.post("/api/randomize", response_model=RandomizeResponse)
 def randomize(session_id: str = Query(...)):
-    if session_id not in storage.SESSIONS:
+    if not storage.session_exists(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
 
     base_seed = _sha_seed(session_id)
@@ -211,28 +262,26 @@ def randomize(session_id: str = Query(...)):
 
     return RandomizeResponse(passage_ids=passages)
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Passages
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/passage/{passage_id}", response_model=Passage)
 def get_passage(passage_id: str, session_id: str = Query(...)):
-    if session_id not in storage.SESSIONS:
+    if not storage.session_exists(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     p = PASSAGES.get(passage_id)
     if not p:
         raise HTTPException(status_code=404, detail="Passage not found.")
     return Passage(**p)
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Questions (serve chosen source; 6 items = 5 RC + 1 attention check)
 # ──────────────────────────────────────────────────────────────────────────────
 
-@app.get("/api/questions/{passage_id}", response_model=QuestionsResponse)
+@app.get("/api/questions/{passage_id}", response_model=PublicQuestionsResponse)
 def get_questions(passage_id: str, session_id: str = Query(...)):
-    if session_id not in storage.SESSIONS:
+    if not storage.session_exists(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     src = storage.get_source_for(session_id, passage_id)
     if not src:
@@ -246,18 +295,16 @@ def get_questions(passage_id: str, session_id: str = Query(...)):
     if len(qset) < 6:
         raise HTTPException(status_code=500, detail="Insufficient questions for assigned source.")
 
-    # Map your structure → client schema (id ← question_id)
+    # Do NOT leak correct answers
     mapped = [
         {
             "id": q["question_id"],
             "prompt": q["prompt"],
             "choices": q["choices"],
-            "correct_choice_id": q["correct_choice_id"],
         }
         for q in qset
     ]
-    return QuestionsResponse(passage_id=passage_id, questions=mapped)
-
+    return PublicQuestionsResponse(passage_id=passage_id, questions=mapped)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Submit MCQs (store passage_uid, unique question_id, responses)
@@ -265,7 +312,7 @@ def get_questions(passage_id: str, session_id: str = Query(...)):
 
 @app.post("/api/submit_mcq", response_model=MCQSubmitResult)
 def submit_mcq(payload: SubmitMCQPayload):
-    if payload.session_id not in storage.SESSIONS:
+    if not storage.session_exists(payload.session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     src = storage.get_source_for(payload.session_id, payload.passage_id)
     if not src:
@@ -311,14 +358,13 @@ def submit_mcq(payload: SubmitMCQPayload):
     )
     return MCQSubmitResult(passage_id=payload.passage_id, per_question=per, score=score)
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Post-task feedback (store under passage_uid) + data for review
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/posttask")
 def posttask_feedback(payload: PostTaskFeedbackPayload):
-    if payload.session_id not in storage.SESSIONS:
+    if not storage.session_exists(payload.session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     p = PASSAGES.get(payload.passage_id)
     if not p:
@@ -326,14 +372,13 @@ def posttask_feedback(payload: PostTaskFeedbackPayload):
     storage.save_posttask_feedback(payload.session_id, p["id"], payload.ratings or {})
     return {"ok": True}
 
-
 @app.get("/api/posttask_data/{passage_id}")
 def posttask_data(passage_id: str, session_id: str = Query(...)):
-    if session_id not in storage.SESSIONS:
+    if not storage.session_exists(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
 
     passage = PASSAGES.get(passage_id)
-    mcq = storage.MCQ_RESPONSES.get(session_id, {}).get(passage_id)
+    mcq = storage.get_mcq_submission(session_id, passage_id)
     if not passage or not mcq:
         raise HTTPException(status_code=404, detail="Not ready.")
 
@@ -364,22 +409,20 @@ def posttask_data(passage_id: str, session_id: str = Query(...)):
 
     return {"passage": passage, "questions": details, "score": mcq["score"]}
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Vocabulary task
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/vocab/start")
 def vocab_start(session_id: str = Query(...)):
-    if session_id not in storage.SESSIONS:
+    if not storage.session_exists(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     storage.init_vocab(session_id, size=len(VOCAB))
     return {"ok": True, "size": len(VOCAB)}
 
-
 @app.get("/api/vocab/next", response_model=VocabNextResponse)
 def vocab_next(session_id: str = Query(...)):
-    if session_id not in storage.SESSIONS:
+    if not storage.session_exists(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     prog = storage.get_vocab_progress(session_id)
     idx = prog.get("index", 0)
@@ -389,20 +432,17 @@ def vocab_next(session_id: str = Query(...)):
         return VocabNextResponse(done=True, remaining=0, item=None)
 
     item = VOCAB[idx]
-    # Ensure ID exists and is stable
     iid = item.get("id") or f"v{idx}"
     item["id"] = iid
 
     remaining = max(0, min(size, len(VOCAB)) - idx)
     return VocabNextResponse(done=False, remaining=remaining, item=VocabItem(id=iid, token=item["token"]))
 
-
 @app.post("/api/vocab/answer")
 def vocab_answer(payload: VocabAnswerPayload):
-    if payload.session_id not in storage.SESSIONS:
+    if not storage.session_exists(payload.session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    # Look up truth label for this item_id
     truth: Optional[bool] = None
     for it in VOCAB:
         if it.get("id") == payload.item_id:
@@ -414,21 +454,28 @@ def vocab_answer(payload: VocabAnswerPayload):
     storage.advance_vocab(payload.session_id, payload.item_id, payload.is_word, payload.rt_ms)
     return {"ok": True, "correct": bool(payload.is_word == truth)}
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Final check
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/final_check")
-def submit_final_check(
+async def submit_final_check(
+    request: Request,
     payload: Dict[str, Any] = Body(...),
-    session_id: str = Query(...)
+    session_id: str = "",
 ):
-    if session_id not in storage.SESSIONS:
+    if not storage.session_exists(session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
-    storage.final_check(session_id, payload)
-    return {"ok": True}
 
+    token = (payload.get("recaptcha_token") or "").strip()
+    remote_ip = request.client.host if request.client else None
+    ok = await verify_recaptcha_v2(token, remote_ip)
+    storage.mark_recaptcha_result(session_id, "final_check", ok)
+    if not ok:
+        raise HTTPException(status_code=400, detail="reCAPTCHA failed")
+
+    storage.final_check(session_id, payload, recaptcha_verification="yes")
+    return {"ok": True}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging endpoints
@@ -436,7 +483,7 @@ def submit_final_check(
 
 @app.post("/api/log/participation_end")
 def log_participation_end(payload: ParticipationEndRequest):
-    if payload.session_id not in storage.SESSIONS:
+    if not storage.session_exists(payload.session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     try:
         res = storage.log_total_participation_time(payload.session_id, payload.finished_at_ms)
@@ -444,10 +491,9 @@ def log_participation_end(payload: ParticipationEndRequest):
         raise HTTPException(status_code=400, detail=str(e))
     return res
 
-
 @app.post("/api/log/attention")
 def log_attention(payload: AttentionLogPayload):
-    if payload.session_id not in storage.SESSIONS:
+    if not storage.session_exists(payload.session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     try:
         res = storage.log_total_task_time(payload.session_id, payload.bucket, payload.elapsed_ms)
@@ -455,10 +501,9 @@ def log_attention(payload: AttentionLogPayload):
         raise HTTPException(status_code=400, detail=str(e))
     return res
 
-
 @app.post("/api/log/rc_event")
 def log_rc_event(payload: RCEventPayload):
-    if payload.session_id not in storage.SESSIONS:
+    if not storage.session_exists(payload.session_id):
         raise HTTPException(status_code=404, detail="Session not found.")
     try:
         rec = storage.log_reading_comprehension_details(
