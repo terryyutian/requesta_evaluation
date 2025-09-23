@@ -1,3 +1,4 @@
+<!-- frontend/demographic.html -->
 <!doctype html>
 <html>
 <head>
@@ -5,7 +6,7 @@
   <title>Demographic Survey</title>
   <link rel="stylesheet" href="styles.css" />
   <script src="config.js"></script>
-  <!-- Explicit rendering so we can set the site key from config.js -->
+  <!-- Keep the onload callback + explicit rendering, as your app.js expects -->
   <script src="https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit" async defer></script>
   <script src="js/app.js" defer></script>
 </head>
@@ -14,7 +15,6 @@
     <div class="card">
       <h1 style="text-align: center;">Demographic Survey</h1>
       <form id="demo-form">
-
         <!-- Q0 -->
         <fieldset>
           <legend><strong>Q0:</strong> What is your Prolific ID?</legend>
@@ -159,6 +159,7 @@
             <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="5 or more hours"><span>5 or more hours</span></label></li>
           </ul>
         </fieldset>
+
         <!-- reCAPTCHA -->
         <fieldset>
           <legend><strong>Verify you’re human</strong></legend>

@@ -5,7 +5,7 @@
   <title>Final Check</title>
   <link rel="stylesheet" href="styles.css" />
   <script src="config.js"></script>
-  <!-- Explicit rendering so we can set the site key from config.js -->
+  <!-- keep explicit render; initFinalCheck will call grecaptcha.render(...) -->
   <script src="https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit" async defer></script>
   <script src="js/app.js" defer></script>
 </head>
@@ -48,7 +48,9 @@
         <!-- reCAPTCHA -->
         <fieldset>
           <legend><strong>Verify you’re human</strong></legend>
-          <div class="recaptcha" data-recaptcha="widget"></div>
+          <!-- IDs that initFinalCheck() uses -->
+          <div id="recaptcha" class="recaptcha"></div>
+          <input type="hidden" id="recaptchaToken" />
         </fieldset>
 
         <div class="right">
