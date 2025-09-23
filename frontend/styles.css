@@ -228,3 +228,10 @@ button.danger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2p
   /* optional, to prevent super-wide fields on huge screens: */
   max-width: 480px;
 }
+/* Vocab decision buttons: add space between Yes/No */
+#yes { margin-right: 12px; }
+.vocab-controls {
+  display: inline-flex;
+  gap: 12px;            /* spacing between Yes/No */
+  flex-wrap: wrap;      /* wraps on small screens */
+}

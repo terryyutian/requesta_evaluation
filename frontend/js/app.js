@@ -1,7 +1,7 @@
 // --- Basic config ---
 const API_BASE =
-  (typeof window !== "undefined" && window.API_BASE_OVERRIDE) ||
-  (location.origin.startsWith("http") ? location.origin.replace(/(:\d+)?$/, ":8000") : "http://127.0.0.1:8000");
+  (typeof window !== "undefined" && window.API_BASE_OVERRIDE) || "";
+
 
 // Minimal global error surfacing
 window.addEventListener("error", (e) => {
@@ -515,23 +515,24 @@ async function initVocabInstruction() {
   }
 }
 
+
 // vocab.html
 async function initVocab() {
   ensureSessionOrRedirect();
   startPageAttention("vocabulary");
 
   // --- Game settings ---
-  const TIME_LIMIT_MS = 60000;   // 1 minute
-  let   MAX_ITEMS     = 60;      // will be overwritten by server size if available
+  const TIME_LIMIT_MS = 60000;  // 1 minute
+  const MAX_ITEMS     = 60;     // cap display/progress at 60
 
   // --- UI elements ---
-  const tokenEl    = qs("#token");
-  const yesBtn     = qs("#yes");
-  const noBtn      = qs("#no");
-  const timeFill   = qs("#timeFill");      // optional (may be null)
-  const doneEl     = qs("#doneCount");     // optional (may be null)
-  const accEl      = qs("#accPct");        // optional (may be null)
-  const remainingEl= qs("#remaining");     // optional (may be null)
+  const tokenEl     = qs("#token");
+  const yesBtn      = qs("#yes");
+  const noBtn       = qs("#no");
+  const timeFill    = qs("#timeFill");      // optional
+  const doneEl      = qs("#doneCount");     // optional
+  const accEl       = qs("#accPct");        // optional
+  const remainingEl = qs("#remaining");     // optional
 
   if (!tokenEl || !yesBtn || !noBtn) {
     console.error("[vocab] Missing required DOM elements", { tokenEl, yesBtn, noBtn });
@@ -550,13 +551,17 @@ async function initVocab() {
   let completed = 0;         // number of answered items
   let correct   = 0;         // number answered correctly
 
+  // NEW: collect one-shot payload to send at the end (ONE row in DB)
+  const trials = [];         // { token, user_answer: "yes"|"no" }
+
+  // --- Helpers ---
   function formatAcc() {
     if (completed === 0) return "0%";
     return Math.round((correct / completed) * 100) + "%";
   }
   function updateHUD() {
-    if (doneEl) doneEl.textContent = Math.min(completed, MAX_ITEMS);
-    if (accEl)  accEl.textContent  = formatAcc();
+    if (doneEl)      doneEl.textContent      = Math.min(completed, MAX_ITEMS);
+    if (accEl)       accEl.textContent       = formatAcc();
     if (remainingEl) remainingEl.textContent = Math.max(0, MAX_ITEMS - completed);
   }
   function updateTimer() {
@@ -565,7 +570,7 @@ async function initVocab() {
     const pct = Math.max(0, Math.min(100, (elapsed / TIME_LIMIT_MS) * 100));
     if (timeFill) timeFill.style.width = pct + "%";
     if (elapsed >= TIME_LIMIT_MS) {
-      endGame();
+      void endGame(); // fire-and-forget
     }
   }
   function startTimer() {
@@ -582,42 +587,50 @@ async function initVocab() {
     yesBtn.disabled = !on;
     noBtn.disabled  = !on;
   }
-
   function resultMessage() {
     const acc = completed === 0 ? 0 : Math.round((correct / completed) * 100);
     let ending = "Thank you!";
     if (acc >= 90) ending = "Excellent!";
     else if (acc >= 80) ending = "Good job!";
     else if (acc >= 70) ending = "Well done.";
-    return `Time is out. You have completed ${Math.min(completed, MAX_ITEMS)} out of ${MAX_ITEMS} items in one minute. Your final accuracy rate is ${acc}%. ${ending}`;
+    return `Time is out. You have completed ${Math.min(completed, MAX_ITEMS)} out of 60 items in one minute. Your final accuracy rate is ${acc}%. ${ending}`;
   }
 
-  function endGame() {
+  // --- End game: submit ONE payload, then navigate
+  async function endGame() {
     if (ended) return;
     ended = true;
     stopTimer();
     setButtonsEnabled(false);
 
-    alert(resultMessage());
+    try {
+      await api("/api/vocab/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: getSession(), trials }),
+      });
+    } catch (e) {
+      console.warn("[vocab] final submit failed (continuing):", e);
+    }
 
+    alert(resultMessage());
     markInAppNavigation();
     location.href = "instructions.html?index=0";
   }
 
   async function ensureStarted() {
-    const r = await api(`/api/vocab/start?session_id=${encodeURIComponent(getSession())}`, { method:"POST" });
-    if (typeof r?.size === "number" && r.size > 0) MAX_ITEMS = r.size;
+    await api(`/api/vocab/start?session_id=${encodeURIComponent(getSession())}`, { method:"POST" });
   }
 
   async function loadNext() {
     if (ended) return;
     if (completed >= MAX_ITEMS) {
-      endGame();
+      await endGame();
       return;
     }
     const r = await api(`/api/vocab/next?session_id=${encodeURIComponent(getSession())}`);
     if (r.done || !r.item) {
-      endGame();
+      await endGame();
       return;
     }
     current = r.item;
@@ -633,6 +646,9 @@ async function initVocab() {
     setButtonsEnabled(false);
 
     const rt = Math.round(performance.now() - lastShownAt);
+
+    // Record for final one-shot save
+    trials.push({ token: current.token, user_answer: isWord ? "yes" : "no" });
 
     try {
       const res = await api("/api/vocab/answer", {
@@ -674,6 +690,7 @@ async function initVocab() {
   setButtonsEnabled(true);
   updateHUD();
 }
+
 
 // instructions.html
 async function initRCInstructions() {
@@ -1071,13 +1088,38 @@ async function initPostTask() {
 // final_check.html
 async function initFinalCheck() {
   ensureSessionOrRedirect();
-  renderRecaptchaWidgets(); // render if ready
 
-  const form = document.getElementById("final-form");
+  const form       = document.getElementById("final-form");
   const toolsBlock = document.getElementById("tools-block");
-  const otherBox = document.getElementById("toolOther");
-  const otherText = document.getElementById("toolOtherText");
+  const otherBox   = document.getElementById("toolOther");
+  const otherText  = document.getElementById("toolOtherText");
 
+  // --- reCAPTCHA setup ---
+  const recaptchaDiv   = document.getElementById("recaptcha");
+  const recaptchaToken = document.getElementById("recaptchaToken");
+  let recaptchaWidgetId = null;
+
+  function renderRecaptcha() {
+    if (!recaptchaDiv) return;
+    // Only render if we have a site key and grecaptcha is ready
+    const key = (window.RECAPTCHA_SITE_KEY || "").trim();
+    if (!key || !window.grecaptcha || recaptchaWidgetId !== null) return;
+    recaptchaWidgetId = grecaptcha.render(recaptchaDiv, {
+      sitekey: key,
+      callback: (token) => { if (recaptchaToken) recaptchaToken.value = token || ""; },
+      "expired-callback": () => { if (recaptchaToken) recaptchaToken.value = ""; },
+      "error-callback": () => { if (recaptchaToken) recaptchaToken.value = ""; },
+    });
+  }
+
+  // reCAPTCHA script loads async; attempt render on load & after a small delay
+  if (document.readyState !== "loading") {
+    // try once now
+    setTimeout(renderRecaptcha, 300);
+  }
+  window.addEventListener("load", () => setTimeout(renderRecaptcha, 100));
+
+  // --- existing UI plumbing ---
   function syncToolsBlock() {
     const used = (document.querySelector('input[name="used_ai_tools"]:checked') || {}).value;
     const show = (used === "Yes");
@@ -1105,7 +1147,20 @@ async function initFinalCheck() {
   if (form) {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const used = (document.querySelector('input[name="used_ai_tools"]:checked') || {}).value || null;
+
+      // If reCAPTCHA is rendered (prod), ensure token exists
+      try {
+        if (recaptchaWidgetId !== null && window.grecaptcha) {
+          const token = grecaptcha.getResponse(recaptchaWidgetId);
+          if (recaptchaToken) recaptchaToken.value = token || "";
+          if (!token) {
+            alert("Please complete the reCAPTCHA.");
+            return;
+          }
+        }
+      } catch (_) { /* ignore (dev bypass may be on) */ }
+
+      const used  = (document.querySelector('input[name="used_ai_tools"]:checked') || {}).value || null;
       const tools = Array.from(document.querySelectorAll('input[name="tool"]:checked')).map(cb => cb.value);
       const other = (tools.includes("Other") ? (otherText?.value || "").trim() : "");
 
@@ -1114,26 +1169,31 @@ async function initFinalCheck() {
         if (!hasAny) { alert("Please select at least one tool you used or specify it in 'Other'."); return; }
       }
 
-      // reCAPTCHA token (required only if site key configured)
-      renderRecaptchaWidgets();
-      const rToken = getRecaptchaTokenFromForm(form);
-      if (recaptchaEnabled() && !rToken) {
-        alert("Please complete the reCAPTCHA box before continuing.");
+      const payload = {
+        used_ai_tools: used,
+        tools,
+        other_tool: other,
+        recaptcha_token: recaptchaToken ? recaptchaToken.value : ""
+      };
+
+      try {
+        await api(`/api/final_check?session_id=${encodeURIComponent(getSession())}`, {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        console.error("[final_check] submit failed:", err);
+        alert("Sorry—saving your final check hit an error. Please try again.");
         return;
       }
-
-      const payload = { used_ai_tools: used, tools, other_tool: other, recaptcha_token: rToken || null };
-      await api(`/api/final_check?session_id=${encodeURIComponent(getSession())}`, {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
-      });
 
       markInAppNavigation();
       location.href = "thanks.html";
     });
   }
 }
+
 
 // thanks.html — record total participation time
 async function initThanks() {

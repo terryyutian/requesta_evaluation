@@ -10,7 +10,7 @@ import httpx
 from pathlib import Path
 
 
-from schemas import (
+from .schemas import (
     SessionStartRequest,
     SessionStartResponse,
     DemographicsPayload,
@@ -23,13 +23,14 @@ from schemas import (
     VocabNextResponse,
     VocabItem,
     VocabAnswerPayload,
+    VocabSubmitPayload,
     AttentionLogPayload,
     RCEventPayload,
     ParticipationEndRequest,
 )
-from security import new_session_id
-from data import PASSAGES, QUESTIONS, VOCAB
-import storage
+from .security import new_session_id
+from .data import PASSAGES, QUESTIONS, VOCAB
+from . import storage
 
 APP_VERSION = "0.3.0"
 RECAPTCHA_SECRET = os.getenv("RECAPTCHA_SECRET", "").strip()
@@ -64,7 +65,11 @@ def _recaptcha_required() -> bool:
     return bool(RECAPTCHA_SECRET)
 
 async def verify_recaptcha_v2(token: str, remote_ip: str | None = None) -> bool:
-    # Dev bypass if not required
+    # NEW: easy local/dev bypass
+    if DEV_BYPASS_RECAPTCHA:
+        return True
+
+    # existing behavior:
     if not _recaptcha_required():
         return True
     if not RECAPTCHA_SECRET or not token:
@@ -223,10 +228,24 @@ async def submit_demographics(
     if not ok:
         raise HTTPException(status_code=400, detail="reCAPTCHA failed")
 
-    # sanitize/validate and persist
+    # 1) Normalize (keeps everything in a plain dict)
     normalized = normalize_demographics_v2(payload)
+
+    # 2) Keep typed core fields via model, but DO NOT drop unknowns:
     model = DemographicsPayload(**normalized)
-    storage.save_demographics(session_id, model.model_dump(), recaptcha_verification="yes")
+    model_dict = model.model_dump()
+
+    # 3) Merge any unknown keys into the 'extras' bag so nothing is lost (Q12/Q13 included)
+    try:
+        base_fields = set(model.model_fields.keys())  # pydantic v2
+    except AttributeError:
+        base_fields = {"prolific_id","age","gender","citizenship","ethnicity","education","first_language","extras"}
+
+    extras = {k: v for k, v in normalized.items() if k not in base_fields}
+    model_dict["extras"] = {**(model_dict.get("extras") or {}), **extras}
+
+    # Final save: includes everything (typed + extras)
+    storage.save_demographics(session_id, model_dict, recaptcha_verification="yes")
     return {"ok": True}
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -438,9 +457,30 @@ def vocab_answer(payload: VocabAnswerPayload):
     if truth is None:
         raise HTTPException(status_code=400, detail="Unknown vocabulary item.")
 
-    storage.advance_vocab(payload.session_id, payload.item_id, payload.is_word, payload.rt_ms)
-    return {"ok": True, "correct": bool(payload.is_word == truth)}
+    is_correct = bool(payload.is_word == truth)
 
+    # IMPORTANT: advance the progress counter so /api/vocab/next serves the next token.
+    # This does NOT persist per-click answers in SQLite—our storage.advance_vocab just bumps the index.
+    storage.advance_vocab(
+        payload.session_id,
+        payload.item_id,
+        payload.is_word,
+        payload.rt_ms,
+        is_correct,
+    )
+
+    return {"ok": True, "correct": is_correct}
+
+@app.post("/api/vocab/submit")
+def vocab_submit(payload: VocabSubmitPayload):
+    if not storage.session_exists(payload.session_id):
+        raise HTTPException(status_code=404, detail="Session not found.")
+    # one row only
+    storage.save_vocab_final(
+        payload.session_id,
+        [t.model_dump() for t in payload.trials],
+    )
+    return {"ok": True}
 # ──────────────────────────────────────────────────────────────────────────────
 # Final check
 # ──────────────────────────────────────────────────────────────────────────────

@@ -1,23 +1,32 @@
 """
-Storage layer with in-memory default and optional DynamoDB backend.
-Set STORAGE_BACKEND=dynamodb to enable AWS.
+Storage layer with in-memory default and optional SQLite backend.
+
+Set STORAGE_BACKEND=sqlite to enable SQLite.
 
 Exposed API (used by main.py):
 - start_session(session_id, source=None)
 - session_exists(session_id) -> bool
+
 - save_demographics(session_id, payload, recaptcha_verification=None)
 - mark_recaptcha_result(session_id, endpoint, ok)
+
 - set_assignment(session_id, passage_ids)
 - get_assignment(session_id) -> list[str] | None
 - set_source_assignment(session_id, mapping)
 - get_source_for(session_id, passage_id) -> str | None
+
 - save_mcq_submission(...)
 - get_mcq_submission(session_id, passage_id) -> dict | None
 - save_posttask_feedback(session_id, passage_uid, ratings)
-- init_vocab(session_id, size)
-- advance_vocab(session_id, item_id, is_word, rt_ms)
-- get_vocab_progress(session_id)
+
+- init_vocab(session_id, size)                         # progress only (in-memory)
+- advance_vocab(session_id, item_id, is_word, rt_ms,   # progress only (in-memory)
+                is_correct: bool)
+- get_vocab_progress(session_id)                       # progress only (in-memory)
+- save_vocab_final(session_id, trials)                 # ONE final row persisted (list of {token,user_answer})
+
 - final_check(session_id, data, recaptcha_verification=None)
+
 - log_total_participation_time(session_id, finished_at_ms=None) -> { ... }
 - log_total_task_time(session_id, bucket, elapsed_ms) -> { ... }
 - log_reading_comprehension_details(session_id, event) -> { ... }
@@ -29,6 +38,12 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Optional
 import os
 import time
+import json
+
+# Optional SQLite backend
+USE_SQLITE = os.getenv("STORAGE_BACKEND", "").lower() == "sqlite"
+print(f"Storage backend: {'SQLite' if USE_SQLITE else 'in-memory (dev only)'}")
+_SQLITE_PATH = os.getenv("SQLITE_PATH", "study_data.db")
 
 # -----------------------------
 # Common helpers / defaults
@@ -62,9 +77,7 @@ _ATTENTION_MAX_INC_MS = 4 * 60 * 60 * 1000  # cap single increment to 4h
 # Backend selector
 # -----------------------------
 
-USE_DDB = os.getenv("STORAGE_BACKEND", "").lower() == "dynamodb"
-
-if not USE_DDB:
+if not USE_SQLITE:
     # ==========================================================
     # In-memory backend (also used for testing)
     # ==========================================================
@@ -87,13 +100,17 @@ if not USE_DDB:
     # session_id -> passage_uid -> {question_id: +1/-1}
     POSTTASK: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(dict)
 
-    # session_id -> {index, answers: [{item_id,is_word,rt_ms,ts}], size}
+    # --- Vocabulary (progress only; final payload is saved via save_vocab_final) ---
+    # session_id -> {index, size}
     VOCAB_PROGRESS: Dict[str, Dict[str, Any]] = defaultdict(dict)
+
+    # Final vocab one-row store (for parity with persisted backends)
+    VOCAB_FINAL: Dict[str, Dict[str, Any]] = defaultdict(dict)
 
     # Per-session attention buckets
     TASK_TIME: DefaultDict[str, Dict[str, int]] = defaultdict(lambda: dict(DEFAULT_BUCKETS))
 
-    # RC detailed events (in-memory list; used for blur suppression & also OK for export)
+    # RC detailed events (in-memory list; used for blur suppression/merge & export)
     RC_EVENTS: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
 
     # --- Session & demographics ---
@@ -109,7 +126,7 @@ if not USE_DDB:
         rec = dict(payload)
         if recaptcha_verification in ("yes", "no"):
             rec["recaptcha_verification"] = recaptcha_verification
-        DEMOGRAPHICS[session_id] = rec
+        DEMOGRAPHICS[session_id] = {"payload": rec, "server_ts": _now_ms()}
 
     def mark_recaptcha_result(session_id: str, endpoint: str, ok: bool) -> None:
         sess = SESSIONS.setdefault(session_id, {})
@@ -135,7 +152,7 @@ if not USE_DDB:
     def save_mcq_submission(
         session_id: str,
         passage_id: str,           # key like 'p7'
-        passage_uid: str,          # unique, e.g., 'anthropology_1_2'
+        passage_uid: str,          # e.g., 'anthropology_1_2'
         source: str,               # 'baseline' | 'requesta'
         per_question: List[Dict[str, Any]],
         score: int,
@@ -159,20 +176,22 @@ if not USE_DDB:
             POSTTASK[session_id][passage_uid] = {}
         POSTTASK[session_id][passage_uid].update(ratings)
 
-    # --- Vocabulary task ---
+    # --- Vocabulary task (progress only) ---
 
     def init_vocab(session_id: str, size: int) -> None:
-        VOCAB_PROGRESS[session_id] = {"index": 0, "answers": [], "size": size}
+        VOCAB_PROGRESS[session_id] = {"index": 0, "size": size}
 
-    def advance_vocab(session_id: str, item_id: str, is_word: bool, rt_ms: int | None) -> None:
+    def advance_vocab(session_id: str, item_id: str, is_word: bool, rt_ms: int | None, is_correct: bool) -> None:
+        # We only advance the index; we do NOT persist per-click answers
         prog = VOCAB_PROGRESS[session_id]
-        prog.setdefault("answers", []).append(
-            {"item_id": item_id, "is_word": is_word, "rt_ms": rt_ms, "ts": time.time()}
-        )
         prog["index"] = int(prog.get("index", 0)) + 1
 
     def get_vocab_progress(session_id: str) -> Dict[str, Any]:
-        return VOCAB_PROGRESS.get(session_id, {"index": 0, "answers": [], "size": 0})
+        return VOCAB_PROGRESS.get(session_id, {"index": 0, "size": 0})
+
+    def save_vocab_final(session_id: str, trials: List[Dict[str, Any]]) -> None:
+        # Single final row per session (kept in-memory in this backend)
+        VOCAB_FINAL[session_id] = {"trials": trials, "ts": _now_ms()}
 
     # --- Final check ---
 
@@ -317,66 +336,75 @@ if not USE_DDB:
         RC_EVENTS[session_id].append(rec)
         return rec
 
+    # -----------------------------
+    # (Robust) existence check
+    # -----------------------------
+
+    def session_exists(session_id: str) -> bool:
+        return session_id in SESSIONS
+
 else:
     # ==========================================================
-    # DynamoDB backend
+    # SQLite backend (single kv table with pk/sk)
     # ==========================================================
-    import boto3
-    from boto3.dynamodb.conditions import Key
-    from decimal import Decimal
+    import sqlite3
+    import threading
 
-    # Local cache only for “fast” membership checks during one process lifetime.
-    # NOTE: across restarts, rely on DDB; consider changing main.py to use
-    # storage.session_exists(session_id) instead of checking SESSIONS directly.
+    # Small in-process cache for "fast" membership checks and RC merge logic
     SESSIONS: Dict[str, Dict[str, Any]] = {}
-
-    # For RC suppression/merge logic (kept in-memory), while accepted events also go to DDB:
     RC_EVENTS: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
 
-    _REGION = os.getenv("AWS_REGION", "us-east-1")
-    _DDB_ENDPOINT = os.getenv("DDB_ENDPOINT")  # optional (e.g., local)
-    _TABLE_NAME = os.getenv("DDB_TABLE", "study_data")
-
-    _ddb = boto3.resource("dynamodb", region_name=_REGION, endpoint_url=_DDB_ENDPOINT)
-    _table = _ddb.Table(_TABLE_NAME)
+    _LOCK = threading.RLock()
+    _conn = sqlite3.connect(_SQLITE_PATH, check_same_thread=False)
+    with _conn:
+        _conn.execute("PRAGMA journal_mode=WAL;")
+        _conn.execute("PRAGMA synchronous=NORMAL;")
+        _conn.execute("PRAGMA foreign_keys=ON;")
+        _conn.execute("""
+            CREATE TABLE IF NOT EXISTS kv (
+              pk TEXT NOT NULL,
+              sk TEXT NOT NULL,
+              content_json TEXT NOT NULL,
+              ts INTEGER NOT NULL,
+              PRIMARY KEY (pk, sk)
+            )
+        """)
 
     def _pk(session_id: str) -> str:
-        return f"SESSION#{session_id}"
+        return f"{session_id}"
 
     def _sk(kind: str, suffix: str | None = None) -> str:
         return f"{kind}#{suffix}" if suffix else kind
 
-    def _to_decimal(obj):
-        if isinstance(obj, float):
-            return Decimal(str(obj))
-        if isinstance(obj, dict):
-            return {k: _to_decimal(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_to_decimal(v) for v in obj]
-        return obj
+    def _get(pk: str, sk: str) -> Optional[Dict[str, Any]]:
+        with _LOCK:
+            cur = _conn.execute("SELECT content_json FROM kv WHERE pk=? AND sk=?", (pk, sk))
+            row = cur.fetchone()
+        if not row:
+            return None
+        return json.loads(row[0])
 
-    def _from_decimal(obj):
-        if isinstance(obj, Decimal):
-            as_float = float(obj)
-            return int(as_float) if as_float.is_integer() else as_float
-        if isinstance(obj, list):
-            return [_from_decimal(v) for v in obj]
-        if isinstance(obj, dict):
-            return {k: _from_decimal(v) for k, v in obj.items()}
-        return obj
+    def _put(pk: str, sk: str, content: Dict[str, Any]) -> None:
+        blob = json.dumps(content, separators=(",", ":"), ensure_ascii=False)
+        ts = _now_ms()
+        with _LOCK:
+            _conn.execute(
+                "INSERT INTO kv (pk, sk, content_json, ts) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(pk, sk) DO UPDATE SET content_json=excluded.content_json, ts=excluded.ts",
+                (pk, sk, blob, ts)
+            )
+            _conn.commit()
 
     # --- Session & demographics ---
 
     def start_session(session_id: str, source: str | None = None) -> None:
         SESSIONS[session_id] = {"created_at": time.time(), "source": source, "consent": True}
-        item = {
-            "pk": _pk(session_id),
-            "sk": _sk("PROFILE"),
+        profile = {
             "created_at_ms": _now_ms(),
             "source": source,
             "consent": True,
         }
-        _table.put_item(Item=_to_decimal(item))
+        _put(_pk(session_id), _sk("PROFILE"), profile)
 
     def save_demographics(
         session_id: str,
@@ -386,53 +414,40 @@ else:
         rec = dict(payload)
         if recaptcha_verification in ("yes", "no"):
             rec["recaptcha_verification"] = recaptcha_verification
-        item = {
-            "pk": _pk(session_id),
-            "sk": _sk("DEMOGRAPHICS"),
-            "payload": _to_decimal(rec),
-            "server_ts": _now_ms(),
-        }
-        _table.put_item(Item=item)
+        row = {"payload": rec, "server_ts": _now_ms()}
+        _put(_pk(session_id), _sk("DEMOGRAPHICS"), row)
 
     def mark_recaptcha_result(session_id: str, endpoint: str, ok: bool) -> None:
-        # Update cached session too
-        sess = SESSIONS.setdefault(session_id, {})
-        sess[f"recaptcha_{endpoint}"] = "yes" if ok else "no"
-        sess["recaptcha_ts"] = _now_ms()
-        # Persist on PROFILE row
-        _table.update_item(
-            Key={"pk": _pk(session_id), "sk": _sk("PROFILE")},
-            UpdateExpression="SET #f = :val, recaptcha_ts = :ts",
-            ExpressionAttributeNames={"#f": f"recaptcha_{endpoint}"},
-            ExpressionAttributeValues={":val": "yes" if ok else "no", ":ts": _now_ms()},
-        )
+        prof = _get(_pk(session_id), _sk("PROFILE")) or {}
+        prof[f"recaptcha_{endpoint}"] = "yes" if ok else "no"
+        prof["recaptcha_ts"] = _now_ms()
+        _put(_pk(session_id), _sk("PROFILE"), prof)
+        SESSIONS.setdefault(session_id, {}).update({"recaptcha_ts": prof["recaptcha_ts"]})
 
     # --- Assignment helpers ---
 
     def set_assignment(session_id: str, passage_ids: List[str]) -> None:
-        _table.update_item(
-            Key={"pk": _pk(session_id), "sk": _sk("ASSIGNMENT")},
-            UpdateExpression="SET passage_ids = :p, server_ts = :ts",
-            ExpressionAttributeValues={":p": passage_ids, ":ts": _now_ms()},
-        )
+        row = _get(_pk(session_id), _sk("ASSIGNMENT")) or {}
+        row["passage_ids"] = list(passage_ids)
+        row["server_ts"] = _now_ms()
+        _put(_pk(session_id), _sk("ASSIGNMENT"), row)
 
     def get_assignment(session_id: str) -> List[str] | None:
-        resp = _table.get_item(Key={"pk": _pk(session_id), "sk": _sk("ASSIGNMENT")})
-        return resp.get("Item", {}).get("passage_ids")
+        row = _get(_pk(session_id), _sk("ASSIGNMENT")) or {}
+        return row.get("passage_ids")
 
     def set_source_assignment(session_id: str, mapping: Dict[str, str]) -> None:
-        _table.update_item(
-            Key={"pk": _pk(session_id), "sk": _sk("ASSIGNMENT")},
-            UpdateExpression="SET sources = :s, server_ts = :ts",
-            ExpressionAttributeValues={":s": mapping, ":ts": _now_ms()},
-        )
+        row = _get(_pk(session_id), _sk("ASSIGNMENT")) or {}
+        row["sources"] = dict(mapping)
+        row["server_ts"] = _now_ms()
+        _put(_pk(session_id), _sk("ASSIGNMENT"), row)
 
     def get_source_for(session_id: str, passage_id: str) -> Optional[str]:
-        resp = _table.get_item(Key={"pk": _pk(session_id), "sk": _sk("ASSIGNMENT")})
-        m = resp.get("Item", {}).get("sources") or {}
-        return m.get(passage_id)
+        row = _get(_pk(session_id), _sk("ASSIGNMENT")) or {}
+        srcs = row.get("sources") or {}
+        return srcs.get(passage_id)
 
-    # --- RC data persistence ---
+    # --- RC / MCQ data persistence ---
 
     def save_mcq_submission(
         session_id: str,
@@ -444,66 +459,50 @@ else:
         meta: Dict[str, Any],
     ) -> None:
         item = {
-            "pk": _pk(session_id),
-            "sk": _sk("MCQ", passage_id),
             "passage_uid": passage_uid,
             "source": source,
-            "per_question": _to_decimal(per_question),
+            "per_question": per_question,
             "score": score,
-            "meta": _to_decimal(meta),
+            "meta": meta,
             "ts": _now_ms(),
         }
-        _table.put_item(Item=item)
+        _put(_pk(session_id), _sk("MCQ", passage_id), item)
 
     def get_mcq_submission(session_id: str, passage_id: str) -> Optional[Dict[str, Any]]:
-        resp = _table.get_item(Key={"pk": _pk(session_id), "sk": _sk("MCQ", passage_id)})
-        item = resp.get("Item")
-        return _from_decimal(item) if item else None
+        return _get(_pk(session_id), _sk("MCQ", passage_id))
 
     def save_posttask_feedback(session_id: str, passage_uid: str, ratings: Dict[str, int]) -> None:
-        # Merge with any existing ratings
-        key = {"pk": _pk(session_id), "sk": _sk("POSTTASK", passage_uid)}
-        existing = _table.get_item(Key=key).get("Item", {})
+        key_pk = _pk(session_id)
+        key_sk = _sk("POSTTASK", passage_uid)
+        existing = _get(key_pk, key_sk) or {"ratings": {}}
         merged = dict(existing.get("ratings") or {})
         merged.update(ratings)
-        _table.put_item(Item={"pk": key["pk"], "sk": key["sk"], "ratings": merged, "ts": _now_ms()})
+        _put(key_pk, key_sk, {"ratings": merged, "ts": _now_ms()})
 
     # --- Vocabulary task ---
+    # NOTE: For "one-row final only", we do NOT persist per-click progress in SQLite.
+    # We keep small progress (index/size) in-process to serve /api/vocab/next.
+
+    VOCAB_PROGRESS: Dict[str, Dict[str, Any]] = defaultdict(dict)
 
     def init_vocab(session_id: str, size: int) -> None:
-        item = {
-            "pk": _pk(session_id),
-            "sk": _sk("VOCAB"),
-            "index": 0,
-            "size": size,
-            "answers": [],
-            "ts": _now_ms(),
-        }
-        _table.put_item(Item=item)
+        VOCAB_PROGRESS[session_id] = {"index": 0, "size": size}
 
-    def advance_vocab(session_id: str, item_id: str, is_word: bool, rt_ms: int | None) -> None:
-        ans = [{"item_id": item_id, "is_word": bool(is_word), "rt_ms": rt_ms, "ts": _now_ms()}]
-        _table.update_item(
-            Key={"pk": _pk(session_id), "sk": _sk("VOCAB")},
-            UpdateExpression="""
-                SET #idx = if_not_exists(#idx, :zero) + :one,
-                    #ans = list_append(if_not_exists(#ans, :empty), :new),
-                    ts = :ts
-            """,
-            ExpressionAttributeNames={"#idx": "index", "#ans": "answers"},
-            ExpressionAttributeValues={
-                ":zero": 0, ":one": 1, ":empty": [], ":new": _to_decimal(ans), ":ts": _now_ms()
-            },
-        )
+    def advance_vocab(session_id: str, item_id: str, is_word: bool, rt_ms: int | None, is_correct: bool) -> None:
+        prog = VOCAB_PROGRESS[session_id]
+        prog["index"] = int(prog.get("index", 0)) + 1
 
     def get_vocab_progress(session_id: str) -> Dict[str, Any]:
-        resp = _table.get_item(Key={"pk": _pk(session_id), "sk": _sk("VOCAB")})
-        item = resp.get("Item", {"index": 0, "answers": [], "size": 0})
-        return _from_decimal(item)
+        return VOCAB_PROGRESS.get(session_id, {"index": 0, "size": 0})
+
+    def save_vocab_final(session_id: str, trials: List[Dict[str, Any]]) -> None:
+        # Exactly ONE row per session for vocabulary payload
+        _put(_pk(session_id), _sk("VOCAB"), {"trials": trials, "ts": _now_ms()})
 
     # --- Final check ---
 
     def final_check(session_id: str, data: Dict[str, Any], recaptcha_verification: str | None = None) -> None:
+        prof = _get(_pk(session_id), _sk("PROFILE")) or {}
         rec = {
             "used_ai_tools": data.get("used_ai_tools"),
             "tools": list(data.get("tools") or []),
@@ -512,52 +511,44 @@ else:
         }
         if recaptcha_verification in ("yes", "no"):
             rec["recaptcha_verification"] = recaptcha_verification
-        _table.update_item(
-            Key={"pk": _pk(session_id), "sk": _sk("PROFILE")},
-            UpdateExpression="SET final_check = :fc",
-            ExpressionAttributeValues={":fc": _to_decimal(rec)},
-        )
+        prof["final_check"] = rec
+        _put(_pk(session_id), _sk("PROFILE"), prof)
 
     # --- Time logging ---
 
     def log_total_participation_time(session_id: str, finished_at_ms: Optional[int] = None) -> Dict[str, Any]:
-        resp = _table.get_item(Key={"pk": _pk(session_id), "sk": _sk("PROFILE")})
-        item = resp.get("Item")
-        if not item:
+        prof = _get(_pk(session_id), _sk("PROFILE"))
+        if not prof:
             raise ValueError("Session not found.")
-        start_ms = int(item.get("created_at_ms") or 0)
+        start_ms = int(prof.get("created_at_ms") or 0)
         if start_ms <= 0:
             raise ValueError("Missing session start.")
         end_ms = int(finished_at_ms) if finished_at_ms else _now_ms()
         total_ms = max(0, end_ms - start_ms)
-        _table.update_item(
-            Key={"pk": _pk(session_id), "sk": _sk("PROFILE")},
-            UpdateExpression="SET participation_end_ms = :end, total_participation_ms = :tot",
-            ExpressionAttributeValues={":end": end_ms, ":tot": total_ms},
-        )
+        prof["participation_end_ms"] = end_ms
+        prof["total_participation_ms"] = total_ms
+        _put(_pk(session_id), _sk("PROFILE"), prof)
         return {"session_id": session_id, "total_participation_ms": total_ms}
 
     def log_total_task_time(session_id: str, bucket: str, elapsed_ms: int) -> Dict[str, Any]:
-        key = {"pk": _pk(session_id), "sk": _sk("TASK_TIME")}
-        resp = _table.get_item(Key=key)
-        cur = resp.get("Item", {"pk": key["pk"], "sk": key["sk"], "buckets": dict(DEFAULT_BUCKETS)})
-
-        # Harden: clamp and cap per-call increments
+        key_pk, key_sk = _pk(session_id), _sk("TASK_TIME")
+        cur = _get(key_pk, key_sk) or {"buckets": dict(DEFAULT_BUCKETS)}
+        # clamp/cap increment
         try:
             inc = int(elapsed_ms)
         except Exception:
             inc = 0
-        inc = max(0, inc)
-        inc = min(inc, _ATTENTION_MAX_INC_MS)
+        inc = max(0, min(inc, _ATTENTION_MAX_INC_MS))
 
-        if bucket not in cur["buckets"]:
-            # Unknown buckets are ignored (compatible with client)
+        buckets = cur.get("buckets") or {}
+        if bucket not in buckets:
             return {"session_id": session_id, "ignored_bucket": bucket}
 
-        cur["buckets"][bucket] = int(cur["buckets"].get(bucket, 0)) + inc
+        buckets[bucket] = int(buckets.get(bucket, 0)) + inc
+        cur["buckets"] = buckets
         cur["ts"] = _now_ms()
-        _table.put_item(Item=cur)
-        return {"session_id": session_id, "bucket": bucket, "total_ms": cur["buckets"][bucket]}
+        _put(key_pk, key_sk, cur)
+        return {"session_id": session_id, "bucket": bucket, "total_ms": buckets[bucket]}
 
     # --- RC detailed events (with in-memory suppression/merge logic) ---
 
@@ -635,12 +626,8 @@ else:
                 if gap <= _RC_MERGE_GAP_MS:
                     prev["duration_ms"] = min(int(prev["duration_ms"]) + duration_ms + gap, _RC_MAX_SEG_MS)
                     prev["server_ts"] = server_ts
-                    # Optional: keep DDB parity by updating the existing row
-                    _table.update_item(
-                        Key={"pk": _pk(session_id), "sk": _sk("RC", f"{prev['start_time']:013d}")},
-                        UpdateExpression="SET duration_ms = :d, server_ts = :ts",
-                        ExpressionAttributeValues={":d": int(prev["duration_ms"]), ":ts": server_ts},
-                    )
+                    # Update existing RC row too
+                    _put(_pk(session_id), _sk("RC", f"{prev['start_time']:013d}"), prev)
                     return prev
 
         # Append + write accepted event
@@ -654,27 +641,21 @@ else:
             "server_ts": server_ts,
         }
         RC_EVENTS[session_id].append(rec)
-
-        ddb_item = {
-            "pk": _pk(session_id),
-            "sk": _sk("RC", f"{start_time:013d}"),  # sortable
-            **rec,
-        }
-        _table.put_item(Item=_to_decimal(ddb_item))
+        _put(_pk(session_id), _sk("RC", f"{start_time:013d}"), rec)
         return rec
 
-# -----------------------------
-# (Robust) existence check
-# -----------------------------
+    # -----------------------------
+    # (Robust) existence check
+    # -----------------------------
 
-def session_exists(session_id: str) -> bool:
-    """Robust existence check. In-memory True if present; in DDB mode, query DynamoDB."""
-    if session_id in SESSIONS:
-        return True
-    if not USE_DDB:
-        return False
-    resp = _table.get_item(Key={"pk": f"SESSION#{session_id}", "sk": "PROFILE"})
-    found = "Item" in resp
-    if found:  # warm the cache
-        SESSIONS.setdefault(session_id, {})
-    return found
+    def session_exists(session_id: str) -> bool:
+        if session_id in SESSIONS:
+            return True
+        # query kv PROFILE
+        pk = _pk(session_id)
+        with _LOCK:
+            cur = _conn.execute("SELECT 1 FROM kv WHERE pk=? AND sk='PROFILE' LIMIT 1", (pk,))
+            found = cur.fetchone() is not None
+        if found:
+            SESSIONS.setdefault(session_id, {})
+        return found

@@ -15,7 +15,6 @@
       <h1>Final Check</h1>
 
       <form id="final-form">
-
         <fieldset>
           <legend><strong>While completing this survey, did you use any AI tools (e.g., ChatGPT, Gemini) or web search engines (e.g., Google, Bing) to generate or look up answers to any of the reading comprehension questions?</strong></legend>
           <p class="badge"><strong>Note: Your payment will not be reduced or withheld based on your answer to this question; we are only interested in accurate reporting.</strong></p>
@@ -37,7 +36,10 @@
             <li><label class="option-row"><input type="checkbox" name="tool" value="Grok"><span>Grok</span></label></li>
             <li><label class="option-row"><input type="checkbox" name="tool" value="Claude"><span>Claude</span></label></li>
             <li>
-              <label class="option-row"><input type="checkbox" id="toolOther" name="tool" value="Other"><span>Other (specify)</span></label>
+              <label class="option-row">
+                <input type="checkbox" id="toolOther" name="tool" value="Other">
+                <span>Other (specify)</span>
+              </label>
               <input id="toolOtherText" placeholder="Type other tool..." style="margin-top:8px; display:none;" />
             </li>
           </ul>
