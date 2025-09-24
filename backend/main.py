@@ -11,7 +11,7 @@ import httpx
 from pathlib import Path
 
 
-from .schemas import (
+from backend.schemas import (
     SessionStartRequest,
     SessionStartResponse,
     DemographicsPayload,
@@ -29,9 +29,9 @@ from .schemas import (
     RCEventPayload,
     ParticipationEndRequest,
 )
-from .security import new_session_id
-from .data import PASSAGES, QUESTIONS, VOCAB
-from . import storage
+from backend.security import new_session_id
+from backend.data import PASSAGES, QUESTIONS, VOCAB
+from backend import storage
 load_dotenv()
 
 
