@@ -9,6 +9,7 @@ import random
 import os
 import httpx
 from pathlib import Path
+from backend.database import _get, _get_ssm_param
 
 
 from backend.schemas import (
@@ -36,9 +37,11 @@ load_dotenv()
 
 
 APP_VERSION = "0.3.0"
-RECAPTCHA_SECRET = os.getenv("RECAPTCHA_SECRET", "").strip()
-RECAPTCHA_MODE = (os.getenv("RECAPTCHA_MODE") or "auto").strip().lower()
-DEV_BYPASS_RECAPTCHA = os.getenv("DEV_BYPASS_RECAPTCHA", "0").strip() == "1"
+# reCAPTCHA
+RECAPTCHA_SECRET = _get("RECAPTCHA_SECRET", ssm_path="/requesta/RECAPTCHA_SECRET", secure=True) or ""
+RECAPTCHA_MODE = (_get("RECAPTCHA_MODE", default="auto", ssm_path="/requesta/RECAPTCHA_MODE") or "auto").strip().lower()
+DEV_BYPASS_RECAPTCHA = (_get("DEV_BYPASS_RECAPTCHA", default="0", ssm_path="/requesta/DEV_BYPASS_RECAPTCHA") or "0").strip() == "1"
+
 
 app = FastAPI(title="Study Data Collection API", version=APP_VERSION)
 
