@@ -206,18 +206,65 @@ window.onRecaptchaLoad = function () {
   renderRecaptchaWidgets();
 };
 function renderRecaptchaWidgets() {
-  if (!recaptchaEnabled() || !RECAPTCHA_READY || typeof grecaptcha === "undefined") return;
+  if (!recaptchaEnabled() || typeof grecaptcha === "undefined") return;
   document.querySelectorAll('[data-recaptcha="widget"]:not([data-rendered="1"])').forEach((el) => {
-    const wid = grecaptcha.render(el, { sitekey: window.RECAPTCHA_SITE_KEY });
+    const wid = grecaptcha.render(el, {
+      sitekey: window.RECAPTCHA_SITE_KEY,
+      callback: () => {
+        // optional: keep a hidden input in the same form in sync
+        const form = el.closest("form");
+        if (form) {
+          const hid = form.querySelector('input[name="recaptcha_token"]') 
+                  || (() => { const i = document.createElement("input"); i.type="hidden"; i.name="recaptcha_token"; form.appendChild(i); return i; })();
+          hid.value = grecaptcha.getResponse(wid) || "";
+        }
+      },
+      "expired-callback": () => {
+        const form = el.closest("form");
+        const hid = form?.querySelector('input[name="recaptcha_token"]');
+        if (hid) hid.value = "";
+      },
+      "error-callback": () => {
+        const form = el.closest("form");
+        const hid = form?.querySelector('input[name="recaptcha_token"]');
+        if (hid) hid.value = "";
+      },
+    });
     el.setAttribute("data-rendered", "1");
     el.setAttribute("data-widget-id", String(wid));
   });
 }
+(function mountRecaptchaWhenReady(){
+  if (typeof window !== "undefined" && window.grecaptcha) {
+    renderRecaptchaWidgets();
+  } else {
+    setTimeout(mountRecaptchaWhenReady, 200);
+  }
+})();
+
 function getRecaptchaTokenFromForm(formEl) {
   if (!formEl) return null;
-  const t = formEl.querySelector('textarea[name="g-recaptcha-response"]');
+
+  // Prefer the official JS API via widget id(s)
+  try {
+    if (typeof window.grecaptcha !== "undefined") {
+      const widgets = formEl.querySelectorAll('[data-recaptcha="widget"][data-widget-id]');
+      for (const el of widgets) {
+        const wid = Number(el.getAttribute("data-widget-id"));
+        if (!Number.isNaN(wid)) {
+          const token = grecaptcha.getResponse(wid);
+          if (token) return token;
+        }
+      }
+    }
+  } catch (_) { /* fall back below */ }
+
+  // Fallback to hidden textarea (some builds still populate it)
+  const t = (formEl.querySelector('textarea[name="g-recaptcha-response"]')
+          || document.querySelector('textarea[name="g-recaptcha-response"]'));
   return (t && t.value && t.value.trim()) ? t.value.trim() : null;
 }
+
 
 /* =========================
    Page controllers
