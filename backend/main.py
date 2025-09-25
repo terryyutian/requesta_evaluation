@@ -1,4 +1,5 @@
 # backend/main.py
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Body, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +32,8 @@ from .schemas import (
 from .security import new_session_id
 from .data import PASSAGES, QUESTIONS, VOCAB
 from . import storage
+load_dotenv()
+
 
 APP_VERSION = "0.3.0"
 RECAPTCHA_SECRET = os.getenv("RECAPTCHA_SECRET", "").strip()
