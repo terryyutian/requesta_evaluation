@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="styles.css" />
   <script src="config.js"></script>
   <!-- Keep the onload callback + explicit rendering, as your app.js expects -->
-  <script src="https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit" async defer></script>
+  <script src="https://www.google.com/recaptcha/api.js?render=explicit" async defer></script>
   <script src="js/app.js" defer></script>
 </head>
 <body data-page="demographic">
@@ -150,7 +150,7 @@
 
         <!-- Q13 -->
         <fieldset>
-          <legend><strong>Q13:</strong> How many hours per week do you read material that is <em>not</em> required by your teachers/instructors?</legend>
+          <legend><strong>Q13:</strong> How many hours per week do you read?</legend>
           <ul class="options">
             <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="None" required><span>None</span></label></li>
             <li><label class="option-row"><input type="radio" name="q13_reading_hours" value="Less than 1 hour"><span>Less than 1 hour</span></label></li>

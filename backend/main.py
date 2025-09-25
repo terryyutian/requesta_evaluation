@@ -43,6 +43,12 @@ RECAPTCHA_MODE = os.getenv("RECAPTCHA_MODE") or (_get("RECAPTCHA_MODE", default=
 DEV_BYPASS_RECAPTCHA = os.getenv("DEV_BYPASS_RECAPTCHA") or (_get("DEV_BYPASS_RECAPTCHA", default="0", ssm_path="/requesta/DEV_BYPASS_RECAPTCHA") or "0").strip() == "1"
 
 
+print(
+    "[recaptcha cfg] mode=", RECAPTCHA_MODE,
+    "secret_set=", bool(RECAPTCHA_SECRET),
+    "dev_bypass=", DEV_BYPASS_RECAPTCHA
+)
+
 app = FastAPI(title="Study Data Collection API", version=APP_VERSION)
 
 # --- CORS ---
@@ -71,15 +77,16 @@ def _recaptcha_required() -> bool:
     return bool(RECAPTCHA_SECRET)
 
 async def verify_recaptcha_v2(token: str, remote_ip: str | None = None) -> bool:
-    # NEW: easy local/dev bypass
     if DEV_BYPASS_RECAPTCHA:
+        print("[reCAPTCHA] bypass (dev)")
         return True
-
-    # existing behavior:
     if not _recaptcha_required():
+        print("[reCAPTCHA] not required (mode/secret disabled)")
         return True
     if not RECAPTCHA_SECRET or not token:
+        print("[reCAPTCHA] skipped: missing secret or token")
         return False
+
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.post(
@@ -91,9 +98,17 @@ async def verify_recaptcha_v2(token: str, remote_ip: str | None = None) -> bool:
                 },
             )
         data = r.json()
-        return bool(data.get("success") is True)
-    except Exception:
+        ok = bool(data.get("success"))
+        # Mask token for safety; log code paths clearly
+        print("[reCAPTCHA] verify result:", "OK" if ok else "FAIL", 
+              "hostname=", data.get("hostname"), 
+              "errors=", data.get("error-codes"))
+        return ok
+    except Exception as e:
+        print("[reCAPTCHA] verify exception:", repr(e))
         return False
+
+
 
 
 def _sha_seed(text: str) -> int:
