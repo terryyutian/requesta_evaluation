@@ -115,7 +115,7 @@ class RCEvent(Base):
     passage_id = Column(String(64))
     page_name = Column(String(128))
     status = Column(Enum("active", "blur"))
-    start_time = Column(Integer)  # client epoch ms
+    start_time = Column(BigInteger)  # client epoch ms
     duration_ms = Column(Integer)
     server_ts = Column(DateTime, default=datetime.datetime.utcnow)
 
