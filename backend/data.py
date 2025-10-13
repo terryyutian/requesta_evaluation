@@ -1624,9 +1624,7 @@ QUESTIONS = {'p1': {'id': 'anthropology_1_2',
                                                 {'id': 'b',
                                                  'text': "B) England's religious and political "
                                                          'conflicts fostered contrasting colonial '
-                                                         'goals—profit-driven Chesapeake '
-                                                         'settlements and faith-centered New '
-                                                         'England towns—resulting in divergent '
+                                                         'goals, resulting in divergent '
                                                          'cultures under weak imperial oversight.'},
                                                 {'id': 'c',
                                                  'text': "C) English promoters' promises of "
@@ -3522,11 +3520,10 @@ QUESTIONS = {'p1': {'id': 'anthropology_1_2',
                                      'prompt': 'Q5: Which of the following best expresses the main '
                                                'idea of the text?',
                                      'choices': [{'id': 'a',
-                                                  'text': 'A) Industrial-era innovations reshaped '
+                                                  'text': 'A) Industrial era reshaped '
                                                           'Europe, boosting output and '
                                                           'urbanization, shifting power, and '
-                                                          'spurring social institutions and '
-                                                          'ideas.'},
+                                                          'spurring ideas.'},
                                                  {'id': 'b',
                                                   'text': "B) Industrialization's urban problems "
                                                           'prompted governments to regulate '
