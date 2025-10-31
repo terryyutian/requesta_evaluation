@@ -33,6 +33,10 @@ from backend.schemas import (
 from backend.security import new_session_id
 from backend.data import PASSAGES, QUESTIONS, VOCAB
 from backend import storage
+from .security import new_session_id
+from .data import PASSAGES, QUESTIONS, VOCAB
+from .data import is_returning_prolific
+from . import storage
 load_dotenv()
 
 
@@ -230,6 +234,24 @@ def session_start(req: SessionStartRequest):
     return SessionStartResponse(session_id=sid)
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Returning participant check
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/check_prolific")
+def check_prolific(prolific_id: str = Query(..., description="Prolific participant ID to check")):
+    """
+    Return whether the given prolific_id is already known (returning participant).
+    Response: {"returning": true|false}
+    """
+    try:
+        returning = bool(is_returning_prolific(prolific_id))
+        return {"returning": returning}
+    except Exception as e:
+        print("[check_prolific] error:", repr(e))
+        # Fail-open for UX: treat issues as "not returning"
+        return {"returning": False}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Demographics (JSON blob; future-proof)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -248,6 +270,13 @@ async def submit_demographics(
     storage.mark_recaptcha_result(session_id, "demographics", ok)
     if not ok:
         raise HTTPException(status_code=400, detail="reCAPTCHA failed")
+    
+    # --- Duplicate Prolific ID check (server-side enforcement) ---
+    prolific_id_raw = (payload.get("prolific_id") or "").strip()
+    if is_returning_prolific(prolific_id_raw):
+        # Reject duplicate submissions (client will show a user-facing modal)
+        # 409 Conflict indicates the ID is already present
+        raise HTTPException(status_code=409, detail="duplicate_prolific")
 
     # 1) Normalize (keeps everything in a plain dict)
     normalized = normalize_demographics_v2(payload)

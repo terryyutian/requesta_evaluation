@@ -18,14 +18,14 @@
         <!-- Q0 -->
         <fieldset>
           <legend><strong>Q0:</strong> What is your Prolific ID?</legend>
-          <input name="prolific_id" required />
+          <input name="prolific_id" required onpaste="return true" oncopy="return true" oncut="return true" oncontextmenu="return true" />
         </fieldset>
 
         <!-- Q1 -->
         <fieldset>
           <legend><strong>Q1:</strong> What is your age? (number only, e.g., 33)</legend>
           <p class="badge">You must be at least 18 years old to participate.</p>
-          <input name="q1_age" type="number" min="18" step="1" inputmode="numeric" required />
+          <input name="q1_age" type="Number" min="18" step="1" inputmode="numeric" required />
         </fieldset>
 
         <!-- Q2 -->
@@ -170,6 +170,20 @@
           <button type="submit">Continue →</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Duplicate-check modal (used by client-side code to inform returning participants) -->
+  <div id="duplicateModal" class="modal" role="dialog" aria-hidden="true" aria-labelledby="dupTitle" style="display:none;">
+    <div class="modal-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:999;"></div>
+    <div class="modal-panel" role="document" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;padding:20px;border-radius:8px;max-width:560px;box-shadow:0 8px 28px rgba(15,20,30,0.35);z-index:1000;">
+      <h2 id="dupTitle" style="margin:0 0 8px 0;">Notice</h2>
+      <p id="dupMessage" style="margin:0 0 12px 0;font-size:15px;">
+        Our records indicate that you have already participated in a previous session of this study. Please close this window to exit.
+      </p>
+      <div style="display:flex;justify-content:flex-end;">
+        <button id="dupOk" type="button">OK</button>
+      </div>
     </div>
   </div>
 </body>

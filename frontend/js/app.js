@@ -33,15 +33,38 @@ function clearCurrentQ(pid) { localStorage.removeItem(`current_q_${pid}`); }
 
 // --- Anti-copy guards (no logging) ---
 function installGuards() {
-  ["copy","cut","paste","contextmenu"].forEach(evt => {
-    document.addEventListener(evt, (e) => { e.preventDefault(); });
+  ["copy", "cut", "paste", "contextmenu"].forEach(evt => {
+    document.addEventListener(evt, (e) => {
+      try {
+        // Allow copy/paste/cut/contextmenu inside the Prolific ID field only on demographic page
+        const page = document.body?.dataset?.page;
+        const target = e.target;
+        if (page === "demographic" && target && target.name === "prolific_id") {
+          return; // allow native behavior
+        }
+      } catch (_) {
+        // fall through to preventDefault if something odd happened
+      }
+      e.preventDefault();
+    }, { passive: false });
   });
+
   document.addEventListener("keydown", (e) => {
+    try {
+      // Allow Ctrl/Cmd shortcuts when the focused element is the Prolific ID input on the demographic page
+      const page = document.body?.dataset?.page;
+      const target = e.target;
+      if (page === "demographic" && target && target.name === "prolific_id") {
+        return; // allow keyboard shortcuts inside the ID box
+      }
+    } catch (_) {}
+
     if ((e.ctrlKey || e.metaKey) && ["c","x","v","a"].includes(e.key.toLowerCase())) {
       e.preventDefault();
     }
-  });
+  }, { passive: false });
 }
+
 
 // ---- Utilities ----
 function qs(sel){ return document.querySelector(sel); }
@@ -69,6 +92,38 @@ async function api(path, options = {}) {
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res.text();
 }
+
+// showDuplicateModal: display the duplicate modal and optionally attempt to close window
+function showDuplicateModal(message, closeWindow = true) {
+  const modal = document.getElementById("duplicateModal");
+  const msgEl = document.getElementById("dupMessage");
+  const okBtn = document.getElementById("dupOk");
+  if (!modal || !msgEl || !okBtn) {
+    // fallback to alert if modal missing
+    alert(message);
+    if (closeWindow) try { window.close(); } catch (_) {}
+    return;
+  }
+  msgEl.textContent = message;
+  modal.style.display = "block";
+  modal.setAttribute("aria-hidden", "false");
+
+  function cleanup() {
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+    okBtn.removeEventListener("click", okHandler);
+  }
+  function okHandler() {
+    cleanup();
+    if (closeWindow) {
+      try { window.close(); } catch (_) {
+        // Some browsers will block window.close(); then user must manually close
+      }
+    }
+  }
+  okBtn.addEventListener("click", okHandler);
+}
+
 
 function ensureSessionOrRedirect() {
   if (!getSession()) location.href = "consent.html";
@@ -477,6 +532,65 @@ async function initDemographic() {
   // submission
   const form = qs("#demo-form");
   const submitBtn = form?.querySelector('button[type="submit"]');
+  // --- Server-backed duplicate checks for Prolific ID (pre-check + submit handling) ---
+  (function attachServerDuplicateChecks() {
+    const pidInput = document.querySelector('input[name="prolific_id"]');
+    const ageInput = document.querySelector('input[name="q1_age"]');
+    const formEl = qs("#demo-form");
+    if (!pidInput || !ageInput || !formEl) return;
+
+    let lastCheckedPid = null;
+    let lastResponse = null; // cached { returning: bool }
+
+    async function checkPidOnServer(pid) {
+      if (!pid) return { returning: false };
+      const npid = String(pid).trim();
+      if (lastCheckedPid === npid && lastResponse !== null) return lastResponse;
+      try {
+        const res = await api(`/api/check_prolific?prolific_id=${encodeURIComponent(npid)}`);
+        lastCheckedPid = npid;
+        lastResponse = res;
+        return res;
+      } catch (err) {
+        console.warn("[check_prolific] network error:", err);
+        // Fail-open UX decision: do not block on network errors here
+        return { returning: false };
+      }
+    }
+
+    // Pre-check when user starts typing age (per your requested trigger)
+    ageInput.addEventListener("input", async () => {
+      const pid = (pidInput.value || "").trim();
+      if (!pid) return;
+      const r = await checkPidOnServer(pid);
+      if (r && r.returning) {
+        showDuplicateModal(
+          "Our records indicate that you have already participated in a previous session of this study. Please close this window to exit.",
+          true
+        );
+      }
+    });
+
+    // Submit-time: the existing form submit handler will call /api/demographics.
+    // We intercept the error and show the stronger message on 409.
+    // NOTE: your original submit listener already exists below; we patch its catch behavior.
+    // To integrate: replace the existing catch in your demographic submit handler
+    // with the catch logic shown below (or add this handler to the top-level catch behavior).
+
+    // Below is a helper to be used inside the demographic submit catch:
+    function handleDuplicateOnSubmit() {
+      showDuplicateModal(
+        "Our records indicate that you have already participated in a previous session of this study. Please close this window to exit. Continuing with the study will result in no compensation for your participation.",
+        true
+      );
+      // disable submit to reduce repeated attempts
+      const submitBtn = formEl.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.setAttribute("disabled", "disabled");
+    }
+
+    // We do not override the existing submit listener here — instead, patch its catch block.
+    // See instructions below to update the existing `catch (err) { ... }` in `form.addEventListener("submit", ...)`.
+  })();
 
   if (form) {
     form.addEventListener("submit", async (e) => {
@@ -537,12 +651,34 @@ async function initDemographic() {
         // 3) Navigate
         markInAppNavigation();
         location.href = "vocab_instruction.html";
-      } catch (err) {
-        console.error("[demographic submit] failed:", err);
-        alert("Sorry—saving your responses hit an error.\nCheck your internet connection, then try again.");
-      } finally {
-        submitBtn?.removeAttribute("disabled");
-      }
+        } catch (err) {
+          console.error("[demographic submit] failed:", err);
+
+          // If server returned 409 (duplicate), show the explicit duplicate message
+          // Your api() helper attaches err.status and err.body when non-OK; check status === 409
+          if (err && (err.status === 409 || String(err.status).includes("409"))) {
+            // Stronger submit-time message about compensation
+            showDuplicateModal(
+              "Our records indicate that you have already participated in a previous session of this study. Please close this window to exit. Continuing with the study will result in no compensation for your participation.",
+              true
+            );
+            // disable the submit button to avoid repeated attempts
+            submitBtn?.setAttribute("disabled", "disabled");
+            return;
+          }
+
+          // Otherwise, show generic network/other failure message
+          alert("Sorry—saving your responses hit an error.\nCheck your internet connection, then try again.");
+        } finally {
+          // Remove disabled only when we did not set it due to duplicate (we returned earlier)
+          // So only remove if button still exists and not disabled by duplicate handler
+          try {
+            if (submitBtn && !submitBtn.hasAttribute("data-keep-disabled")) {
+              submitBtn.removeAttribute("disabled");
+            }
+          } catch (_) {}
+        }
+
     });
   }
 }

@@ -72,3 +72,5 @@ def normalize_demographics(raw: Dict[str, Any]) -> Dict[str, Any]:
     # Everything else → extras (but not L2 when not applicable)
     out["extras"] = {k: v for k, v in raw.items() if k not in used}
     return out
+
+
