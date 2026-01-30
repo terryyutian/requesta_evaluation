@@ -228,3 +228,115 @@ button.danger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2p
   /* optional, to prevent super-wide fields on huge screens: */
   max-width: 480px;
 }
+/* Vocab decision buttons: add space between Yes/No */
+#yes { margin-right: 12px; }
+.vocab-controls {
+  display: inline-flex;
+  gap: 12px;            /* spacing between Yes/No */
+  flex-wrap: wrap;      /* wraps on small screens */
+}
+
+
+/* -------------------------------
+   Duplicate-warning modal styling
+   Aligns modal with app's warning/error UI
+   ------------------------------- */
+
+#duplicateModal {
+  position: fixed;
+  inset: 0;
+  display: none;             /* JS toggles display:block when showing */
+  z-index: 1000;
+  font-family: inherit;
+}
+
+/* dark translucent backdrop, same tone used elsewhere */
+#duplicateModal .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 15, 0.6); /* slightly darker than card backdrop */
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+}
+
+/* panel: reuse card-like visual language */
+#duplicateModal .modal-panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(92%, 640px);
+  max-width: 640px;
+  background: linear-gradient(180deg, #0b1220, #0b1020);
+  border: 1px solid #243145;
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 24px 48px rgba(4,6,12,0.6), inset 0 0 0 1px #13182255;
+  z-index: 1001;
+  color: var(--text);
+}
+
+/* Title */
+#duplicateModal #dupTitle {
+  margin: 0 0 8px 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Message copy — emphasize as a warning */
+#duplicateModal #dupMessage {
+  margin: 0 0 14px 0;
+  color: var(--muted);
+  line-height: 1.45;
+  font-size: 0.98rem;
+}
+
+/* Button row alignment (right) */
+#duplicateModal .modal-panel > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* OK button: styled as a warning/danger action (consistent with app tone) */
+#duplicateModal button#dupOk,
+#duplicateModal button#dupOk:visited {
+  /* use danger tonal treatment — but keep strong readable text */
+  background: var(--danger);
+  color: #3b0d0d;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(14,18,24,0.45);
+}
+#duplicateModal button#dupOk:hover { filter: brightness(1.06); }
+#duplicateModal button#dupOk:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Make modal look slightly "alerty" by adding a top-accent bar (optional visual cue) */
+#duplicateModal .modal-panel::before {
+  content: "";
+  display: block;
+  height: 4px;
+  width: 100%;
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+  background: linear-gradient(90deg, var(--warn), var(--danger));
+  margin: -18px -20px 12px -20px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  #duplicateModal .modal-panel {
+    padding: 14px;
+    border-radius: 12px;
+  }
+  #duplicateModal #dupTitle { font-size: 1rem; }
+  #duplicateModal #dupMessage { font-size: 0.95rem; }
+  #duplicateModal button#dupOk { padding: 8px 12px; }
+}

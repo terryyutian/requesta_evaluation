@@ -5,8 +5,8 @@
   <title>Final Check</title>
   <link rel="stylesheet" href="styles.css" />
   <script src="config.js"></script>
-  <!-- Explicit rendering so we can set the site key from config.js -->
-  <script src="https://www.google.com/recaptcha/api.js?onload=onRecaptchaLoad&render=explicit" async defer></script>
+  <!-- keep explicit render; initFinalCheck will call grecaptcha.render(...) -->
+  <script src="https://www.google.com/recaptcha/api.js?render=explicit" async defer></script>
   <script src="js/app.js" defer></script>
 </head>
 <body data-page="final_check">
@@ -15,7 +15,6 @@
       <h1>Final Check</h1>
 
       <form id="final-form">
-
         <fieldset>
           <legend><strong>While completing this survey, did you use any AI tools (e.g., ChatGPT, Gemini) or web search engines (e.g., Google, Bing) to generate or look up answers to any of the reading comprehension questions?</strong></legend>
           <p class="badge"><strong>Note: Your payment will not be reduced or withheld based on your answer to this question; we are only interested in accurate reporting.</strong></p>
@@ -37,7 +36,10 @@
             <li><label class="option-row"><input type="checkbox" name="tool" value="Grok"><span>Grok</span></label></li>
             <li><label class="option-row"><input type="checkbox" name="tool" value="Claude"><span>Claude</span></label></li>
             <li>
-              <label class="option-row"><input type="checkbox" id="toolOther" name="tool" value="Other"><span>Other (specify)</span></label>
+              <label class="option-row">
+                <input type="checkbox" id="toolOther" name="tool" value="Other">
+                <span>Other (specify)</span>
+              </label>
               <input id="toolOtherText" placeholder="Type other tool..." style="margin-top:8px; display:none;" />
             </li>
           </ul>
@@ -46,7 +48,9 @@
         <!-- reCAPTCHA -->
         <fieldset>
           <legend><strong>Verify you’re human</strong></legend>
-          <div class="recaptcha" data-recaptcha="widget"></div>
+          <!-- IDs that initFinalCheck() uses -->
+          <div id="recaptcha" class="recaptcha"></div>
+          <input type="hidden" id="recaptchaToken" />
         </fieldset>
 
         <div class="right">

@@ -23,7 +23,7 @@ class DemographicsPayload(BaseModel):
     extras: Dict[str, Any] = Field(default_factory=dict)
 
 class RandomizeResponse(BaseModel):
-    passage_ids: List[str]  # exactly two in this template
+    passage_ids: List[str]  # three in this template
 
 class Passage(BaseModel):
     id: str
@@ -84,6 +84,14 @@ class VocabAnswerPayload(BaseModel):
     item_id: str
     is_word: bool
     rt_ms: Optional[int] = None
+
+class VocabTrial(BaseModel):
+    token: str
+    user_answer: Literal["yes","no"]  # just what you asked for
+
+class VocabSubmitPayload(BaseModel):
+    session_id: str
+    trials: List[VocabTrial]
 
 
 class ParticipationEndRequest(BaseModel):

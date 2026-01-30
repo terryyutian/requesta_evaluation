@@ -1,4 +1,5 @@
 # backend/main.py
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Body, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -8,9 +9,10 @@ import random
 import os
 import httpx
 from pathlib import Path
+from backend.database import _get, _get_ssm_param
 
 
-from schemas import (
+from backend.schemas import (
     SessionStartRequest,
     SessionStartResponse,
     DemographicsPayload,
@@ -23,18 +25,33 @@ from schemas import (
     VocabNextResponse,
     VocabItem,
     VocabAnswerPayload,
+    VocabSubmitPayload,
     AttentionLogPayload,
     RCEventPayload,
     ParticipationEndRequest,
 )
-from security import new_session_id
-from data import PASSAGES, QUESTIONS, VOCAB
-import storage
+from backend.security import new_session_id
+from backend.data import PASSAGES, QUESTIONS, VOCAB
+from backend import storage
+from .security import new_session_id
+from .data import PASSAGES, QUESTIONS, VOCAB
+from .data import is_returning_prolific
+from . import storage
+load_dotenv()
+
 
 APP_VERSION = "0.3.0"
-RECAPTCHA_SECRET = os.getenv("RECAPTCHA_SECRET", "").strip()
-RECAPTCHA_MODE = (os.getenv("RECAPTCHA_MODE") or "auto").strip().lower()
-DEV_BYPASS_RECAPTCHA = os.getenv("DEV_BYPASS_RECAPTCHA", "0").strip() == "1"
+# reCAPTCHA
+RECAPTCHA_SECRET = os.getenv("RECAPTCHA_SECRET") or _get("RECAPTCHA_SECRET", ssm_path="/requesta/RECAPTCHA_SECRET", secure=True) or ""
+RECAPTCHA_MODE = os.getenv("RECAPTCHA_MODE") or (_get("RECAPTCHA_MODE", default="auto", ssm_path="/requesta/RECAPTCHA_MODE") or "auto").strip().lower()
+DEV_BYPASS_RECAPTCHA = os.getenv("DEV_BYPASS_RECAPTCHA") or (_get("DEV_BYPASS_RECAPTCHA", default="0", ssm_path="/requesta/DEV_BYPASS_RECAPTCHA") or "0").strip() == "1"
+
+
+print(
+    "[recaptcha cfg] mode=", RECAPTCHA_MODE,
+    "secret_set=", bool(RECAPTCHA_SECRET),
+    "dev_bypass=", DEV_BYPASS_RECAPTCHA
+)
 
 app = FastAPI(title="Study Data Collection API", version=APP_VERSION)
 
@@ -64,11 +81,16 @@ def _recaptcha_required() -> bool:
     return bool(RECAPTCHA_SECRET)
 
 async def verify_recaptcha_v2(token: str, remote_ip: str | None = None) -> bool:
-    # Dev bypass if not required
+    if DEV_BYPASS_RECAPTCHA:
+        print("[reCAPTCHA] bypass (dev)")
+        return True
     if not _recaptcha_required():
+        print("[reCAPTCHA] not required (mode/secret disabled)")
         return True
     if not RECAPTCHA_SECRET or not token:
+        print("[reCAPTCHA] skipped: missing secret or token")
         return False
+
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.post(
@@ -80,9 +102,17 @@ async def verify_recaptcha_v2(token: str, remote_ip: str | None = None) -> bool:
                 },
             )
         data = r.json()
-        return bool(data.get("success") is True)
-    except Exception:
+        ok = bool(data.get("success"))
+        # Mask token for safety; log code paths clearly
+        print("[reCAPTCHA] verify result:", "OK" if ok else "FAIL", 
+              "hostname=", data.get("hostname"), 
+              "errors=", data.get("error-codes"))
+        return ok
+    except Exception as e:
+        print("[reCAPTCHA] verify exception:", repr(e))
         return False
+
+
 
 
 def _sha_seed(text: str) -> int:
@@ -204,6 +234,24 @@ def session_start(req: SessionStartRequest):
     return SessionStartResponse(session_id=sid)
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Returning participant check
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/check_prolific")
+def check_prolific(prolific_id: str = Query(..., description="Prolific participant ID to check")):
+    """
+    Return whether the given prolific_id is already known (returning participant).
+    Response: {"returning": true|false}
+    """
+    try:
+        returning = bool(is_returning_prolific(prolific_id))
+        return {"returning": returning}
+    except Exception as e:
+        print("[check_prolific] error:", repr(e))
+        # Fail-open for UX: treat issues as "not returning"
+        return {"returning": False}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Demographics (JSON blob; future-proof)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -222,11 +270,32 @@ async def submit_demographics(
     storage.mark_recaptcha_result(session_id, "demographics", ok)
     if not ok:
         raise HTTPException(status_code=400, detail="reCAPTCHA failed")
+    
+    # --- Duplicate Prolific ID check (server-side enforcement) ---
+    prolific_id_raw = (payload.get("prolific_id") or "").strip()
+    if is_returning_prolific(prolific_id_raw):
+        # Reject duplicate submissions (client will show a user-facing modal)
+        # 409 Conflict indicates the ID is already present
+        raise HTTPException(status_code=409, detail="duplicate_prolific")
 
-    # sanitize/validate and persist
+    # 1) Normalize (keeps everything in a plain dict)
     normalized = normalize_demographics_v2(payload)
+
+    # 2) Keep typed core fields via model, but DO NOT drop unknowns:
     model = DemographicsPayload(**normalized)
-    storage.save_demographics(session_id, model.model_dump(), recaptcha_verification="yes")
+    model_dict = model.model_dump()
+
+    # 3) Merge any unknown keys into the 'extras' bag so nothing is lost (Q12/Q13 included)
+    try:
+        base_fields = set(model.model_fields.keys())  # pydantic v2
+    except AttributeError:
+        base_fields = {"prolific_id","age","gender","citizenship","ethnicity","education","first_language","extras"}
+
+    extras = {k: v for k, v in normalized.items() if k not in base_fields}
+    model_dict["extras"] = {**(model_dict.get("extras") or {}), **extras}
+
+    # Final save: includes everything (typed + extras)
+    storage.save_demographics(session_id, model_dict, recaptcha_verification="yes")
     return {"ok": True}
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -438,9 +507,30 @@ def vocab_answer(payload: VocabAnswerPayload):
     if truth is None:
         raise HTTPException(status_code=400, detail="Unknown vocabulary item.")
 
-    storage.advance_vocab(payload.session_id, payload.item_id, payload.is_word, payload.rt_ms)
-    return {"ok": True, "correct": bool(payload.is_word == truth)}
+    is_correct = bool(payload.is_word == truth)
 
+    # IMPORTANT: advance the progress counter so /api/vocab/next serves the next token.
+    # This does NOT persist per-click answers in SQLite—our storage.advance_vocab just bumps the index.
+    storage.advance_vocab(
+        payload.session_id,
+        payload.item_id,
+        payload.is_word,
+        payload.rt_ms,
+        is_correct,
+    )
+
+    return {"ok": True, "correct": is_correct}
+
+@app.post("/api/vocab/submit")
+def vocab_submit(payload: VocabSubmitPayload):
+    if not storage.session_exists(payload.session_id):
+        raise HTTPException(status_code=404, detail="Session not found.")
+    # one row only
+    storage.save_vocab_final(
+        payload.session_id,
+        [t.model_dump() for t in payload.trials],
+    )
+    return {"ok": True}
 # ──────────────────────────────────────────────────────────────────────────────
 # Final check
 # ──────────────────────────────────────────────────────────────────────────────

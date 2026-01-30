@@ -1,7 +1,7 @@
 // --- Basic config ---
 const API_BASE =
-  (typeof window !== "undefined" && window.API_BASE_OVERRIDE) ||
-  (location.origin.startsWith("http") ? location.origin.replace(/(:\d+)?$/, ":8000") : "http://127.0.0.1:8000");
+  (typeof window !== "undefined" && window.API_BASE_OVERRIDE) || "";
+
 
 // Minimal global error surfacing
 window.addEventListener("error", (e) => {
@@ -33,15 +33,38 @@ function clearCurrentQ(pid) { localStorage.removeItem(`current_q_${pid}`); }
 
 // --- Anti-copy guards (no logging) ---
 function installGuards() {
-  ["copy","cut","paste","contextmenu"].forEach(evt => {
-    document.addEventListener(evt, (e) => { e.preventDefault(); });
+  ["copy", "cut", "paste", "contextmenu"].forEach(evt => {
+    document.addEventListener(evt, (e) => {
+      try {
+        // Allow copy/paste/cut/contextmenu inside the Prolific ID field only on demographic page
+        const page = document.body?.dataset?.page;
+        const target = e.target;
+        if (page === "demographic" && target && target.name === "prolific_id") {
+          return; // allow native behavior
+        }
+      } catch (_) {
+        // fall through to preventDefault if something odd happened
+      }
+      e.preventDefault();
+    }, { passive: false });
   });
+
   document.addEventListener("keydown", (e) => {
+    try {
+      // Allow Ctrl/Cmd shortcuts when the focused element is the Prolific ID input on the demographic page
+      const page = document.body?.dataset?.page;
+      const target = e.target;
+      if (page === "demographic" && target && target.name === "prolific_id") {
+        return; // allow keyboard shortcuts inside the ID box
+      }
+    } catch (_) {}
+
     if ((e.ctrlKey || e.metaKey) && ["c","x","v","a"].includes(e.key.toLowerCase())) {
       e.preventDefault();
     }
-  });
+  }, { passive: false });
 }
+
 
 // ---- Utilities ----
 function qs(sel){ return document.querySelector(sel); }
@@ -69,6 +92,38 @@ async function api(path, options = {}) {
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res.text();
 }
+
+// showDuplicateModal: display the duplicate modal and optionally attempt to close window
+function showDuplicateModal(message, closeWindow = true) {
+  const modal = document.getElementById("duplicateModal");
+  const msgEl = document.getElementById("dupMessage");
+  const okBtn = document.getElementById("dupOk");
+  if (!modal || !msgEl || !okBtn) {
+    // fallback to alert if modal missing
+    alert(message);
+    if (closeWindow) try { window.close(); } catch (_) {}
+    return;
+  }
+  msgEl.textContent = message;
+  modal.style.display = "block";
+  modal.setAttribute("aria-hidden", "false");
+
+  function cleanup() {
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+    okBtn.removeEventListener("click", okHandler);
+  }
+  function okHandler() {
+    cleanup();
+    if (closeWindow) {
+      try { window.close(); } catch (_) {
+        // Some browsers will block window.close(); then user must manually close
+      }
+    }
+  }
+  okBtn.addEventListener("click", okHandler);
+}
+
 
 function ensureSessionOrRedirect() {
   if (!getSession()) location.href = "consent.html";
@@ -206,18 +261,65 @@ window.onRecaptchaLoad = function () {
   renderRecaptchaWidgets();
 };
 function renderRecaptchaWidgets() {
-  if (!recaptchaEnabled() || !RECAPTCHA_READY || typeof grecaptcha === "undefined") return;
+  if (!recaptchaEnabled() || typeof grecaptcha === "undefined") return;
   document.querySelectorAll('[data-recaptcha="widget"]:not([data-rendered="1"])').forEach((el) => {
-    const wid = grecaptcha.render(el, { sitekey: window.RECAPTCHA_SITE_KEY });
+    const wid = grecaptcha.render(el, {
+      sitekey: window.RECAPTCHA_SITE_KEY,
+      callback: () => {
+        // optional: keep a hidden input in the same form in sync
+        const form = el.closest("form");
+        if (form) {
+          const hid = form.querySelector('input[name="recaptcha_token"]') 
+                  || (() => { const i = document.createElement("input"); i.type="hidden"; i.name="recaptcha_token"; form.appendChild(i); return i; })();
+          hid.value = grecaptcha.getResponse(wid) || "";
+        }
+      },
+      "expired-callback": () => {
+        const form = el.closest("form");
+        const hid = form?.querySelector('input[name="recaptcha_token"]');
+        if (hid) hid.value = "";
+      },
+      "error-callback": () => {
+        const form = el.closest("form");
+        const hid = form?.querySelector('input[name="recaptcha_token"]');
+        if (hid) hid.value = "";
+      },
+    });
     el.setAttribute("data-rendered", "1");
     el.setAttribute("data-widget-id", String(wid));
   });
 }
+(function mountRecaptchaWhenReady(){
+  if (typeof window !== "undefined" && window.grecaptcha) {
+    renderRecaptchaWidgets();
+  } else {
+    setTimeout(mountRecaptchaWhenReady, 200);
+  }
+})();
+
 function getRecaptchaTokenFromForm(formEl) {
   if (!formEl) return null;
-  const t = formEl.querySelector('textarea[name="g-recaptcha-response"]');
+
+  // Prefer the official JS API via widget id(s)
+  try {
+    if (typeof window.grecaptcha !== "undefined") {
+      const widgets = formEl.querySelectorAll('[data-recaptcha="widget"][data-widget-id]');
+      for (const el of widgets) {
+        const wid = Number(el.getAttribute("data-widget-id"));
+        if (!Number.isNaN(wid)) {
+          const token = grecaptcha.getResponse(wid);
+          if (token) return token;
+        }
+      }
+    }
+  } catch (_) { /* fall back below */ }
+
+  // Fallback to hidden textarea (some builds still populate it)
+  const t = (formEl.querySelector('textarea[name="g-recaptcha-response"]')
+          || document.querySelector('textarea[name="g-recaptcha-response"]'));
   return (t && t.value && t.value.trim()) ? t.value.trim() : null;
 }
+
 
 /* =========================
    Page controllers
@@ -430,6 +532,65 @@ async function initDemographic() {
   // submission
   const form = qs("#demo-form");
   const submitBtn = form?.querySelector('button[type="submit"]');
+  // --- Server-backed duplicate checks for Prolific ID (pre-check + submit handling) ---
+  (function attachServerDuplicateChecks() {
+    const pidInput = document.querySelector('input[name="prolific_id"]');
+    const ageInput = document.querySelector('input[name="q1_age"]');
+    const formEl = qs("#demo-form");
+    if (!pidInput || !ageInput || !formEl) return;
+
+    let lastCheckedPid = null;
+    let lastResponse = null; // cached { returning: bool }
+
+    async function checkPidOnServer(pid) {
+      if (!pid) return { returning: false };
+      const npid = String(pid).trim();
+      if (lastCheckedPid === npid && lastResponse !== null) return lastResponse;
+      try {
+        const res = await api(`/api/check_prolific?prolific_id=${encodeURIComponent(npid)}`);
+        lastCheckedPid = npid;
+        lastResponse = res;
+        return res;
+      } catch (err) {
+        console.warn("[check_prolific] network error:", err);
+        // Fail-open UX decision: do not block on network errors here
+        return { returning: false };
+      }
+    }
+
+    // Pre-check when user starts typing age (per your requested trigger)
+    ageInput.addEventListener("input", async () => {
+      const pid = (pidInput.value || "").trim();
+      if (!pid) return;
+      const r = await checkPidOnServer(pid);
+      if (r && r.returning) {
+        showDuplicateModal(
+          "Our records indicate that you have already participated in a previous session of this study. Please close this window to exit.",
+          true
+        );
+      }
+    });
+
+    // Submit-time: the existing form submit handler will call /api/demographics.
+    // We intercept the error and show the stronger message on 409.
+    // NOTE: your original submit listener already exists below; we patch its catch behavior.
+    // To integrate: replace the existing catch in your demographic submit handler
+    // with the catch logic shown below (or add this handler to the top-level catch behavior).
+
+    // Below is a helper to be used inside the demographic submit catch:
+    function handleDuplicateOnSubmit() {
+      showDuplicateModal(
+        "Our records indicate that you have already participated in a previous session of this study. Please close this window to exit. Continuing with the study will result in no compensation for your participation.",
+        true
+      );
+      // disable submit to reduce repeated attempts
+      const submitBtn = formEl.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.setAttribute("disabled", "disabled");
+    }
+
+    // We do not override the existing submit listener here — instead, patch its catch block.
+    // See instructions below to update the existing `catch (err) { ... }` in `form.addEventListener("submit", ...)`.
+  })();
 
   if (form) {
     form.addEventListener("submit", async (e) => {
@@ -490,12 +651,34 @@ async function initDemographic() {
         // 3) Navigate
         markInAppNavigation();
         location.href = "vocab_instruction.html";
-      } catch (err) {
-        console.error("[demographic submit] failed:", err);
-        alert("Sorry—saving your responses hit an error.\nCheck your internet connection, then try again.");
-      } finally {
-        submitBtn?.removeAttribute("disabled");
-      }
+        } catch (err) {
+          console.error("[demographic submit] failed:", err);
+
+          // If server returned 409 (duplicate), show the explicit duplicate message
+          // Your api() helper attaches err.status and err.body when non-OK; check status === 409
+          if (err && (err.status === 409 || String(err.status).includes("409"))) {
+            // Stronger submit-time message about compensation
+            showDuplicateModal(
+              "Our records indicate that you have already participated in a previous session of this study. Please close this window to exit. Continuing with the study will result in no compensation for your participation.",
+              true
+            );
+            // disable the submit button to avoid repeated attempts
+            submitBtn?.setAttribute("disabled", "disabled");
+            return;
+          }
+
+          // Otherwise, show generic network/other failure message
+          alert("Sorry—saving your responses hit an error.\nCheck your internet connection, then try again.");
+        } finally {
+          // Remove disabled only when we did not set it due to duplicate (we returned earlier)
+          // So only remove if button still exists and not disabled by duplicate handler
+          try {
+            if (submitBtn && !submitBtn.hasAttribute("data-keep-disabled")) {
+              submitBtn.removeAttribute("disabled");
+            }
+          } catch (_) {}
+        }
+
     });
   }
 }
@@ -515,23 +698,24 @@ async function initVocabInstruction() {
   }
 }
 
+
 // vocab.html
 async function initVocab() {
   ensureSessionOrRedirect();
   startPageAttention("vocabulary");
 
   // --- Game settings ---
-  const TIME_LIMIT_MS = 60000;   // 1 minute
-  let   MAX_ITEMS     = 60;      // will be overwritten by server size if available
+  const TIME_LIMIT_MS = 60000;  // 1 minute
+  const MAX_ITEMS     = 60;     // cap display/progress at 60
 
   // --- UI elements ---
-  const tokenEl    = qs("#token");
-  const yesBtn     = qs("#yes");
-  const noBtn      = qs("#no");
-  const timeFill   = qs("#timeFill");      // optional (may be null)
-  const doneEl     = qs("#doneCount");     // optional (may be null)
-  const accEl      = qs("#accPct");        // optional (may be null)
-  const remainingEl= qs("#remaining");     // optional (may be null)
+  const tokenEl     = qs("#token");
+  const yesBtn      = qs("#yes");
+  const noBtn       = qs("#no");
+  const timeFill    = qs("#timeFill");      // optional
+  const doneEl      = qs("#doneCount");     // optional
+  const accEl       = qs("#accPct");        // optional
+  const remainingEl = qs("#remaining");     // optional
 
   if (!tokenEl || !yesBtn || !noBtn) {
     console.error("[vocab] Missing required DOM elements", { tokenEl, yesBtn, noBtn });
@@ -550,13 +734,17 @@ async function initVocab() {
   let completed = 0;         // number of answered items
   let correct   = 0;         // number answered correctly
 
+  // NEW: collect one-shot payload to send at the end (ONE row in DB)
+  const trials = [];         // { token, user_answer: "yes"|"no" }
+
+  // --- Helpers ---
   function formatAcc() {
     if (completed === 0) return "0%";
     return Math.round((correct / completed) * 100) + "%";
   }
   function updateHUD() {
-    if (doneEl) doneEl.textContent = Math.min(completed, MAX_ITEMS);
-    if (accEl)  accEl.textContent  = formatAcc();
+    if (doneEl)      doneEl.textContent      = Math.min(completed, MAX_ITEMS);
+    if (accEl)       accEl.textContent       = formatAcc();
     if (remainingEl) remainingEl.textContent = Math.max(0, MAX_ITEMS - completed);
   }
   function updateTimer() {
@@ -565,7 +753,7 @@ async function initVocab() {
     const pct = Math.max(0, Math.min(100, (elapsed / TIME_LIMIT_MS) * 100));
     if (timeFill) timeFill.style.width = pct + "%";
     if (elapsed >= TIME_LIMIT_MS) {
-      endGame();
+      void endGame(); // fire-and-forget
     }
   }
   function startTimer() {
@@ -582,42 +770,50 @@ async function initVocab() {
     yesBtn.disabled = !on;
     noBtn.disabled  = !on;
   }
-
   function resultMessage() {
     const acc = completed === 0 ? 0 : Math.round((correct / completed) * 100);
     let ending = "Thank you!";
     if (acc >= 90) ending = "Excellent!";
     else if (acc >= 80) ending = "Good job!";
     else if (acc >= 70) ending = "Well done.";
-    return `Time is out. You have completed ${Math.min(completed, MAX_ITEMS)} out of ${MAX_ITEMS} items in one minute. Your final accuracy rate is ${acc}%. ${ending}`;
+    return `Time is out. You have completed ${Math.min(completed, MAX_ITEMS)} out of 60 items in one minute. Your final accuracy rate is ${acc}%. ${ending}`;
   }
 
-  function endGame() {
+  // --- End game: submit ONE payload, then navigate
+  async function endGame() {
     if (ended) return;
     ended = true;
     stopTimer();
     setButtonsEnabled(false);
 
-    alert(resultMessage());
+    try {
+      await api("/api/vocab/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: getSession(), trials }),
+      });
+    } catch (e) {
+      console.warn("[vocab] final submit failed (continuing):", e);
+    }
 
+    alert(resultMessage());
     markInAppNavigation();
     location.href = "instructions.html?index=0";
   }
 
   async function ensureStarted() {
-    const r = await api(`/api/vocab/start?session_id=${encodeURIComponent(getSession())}`, { method:"POST" });
-    if (typeof r?.size === "number" && r.size > 0) MAX_ITEMS = r.size;
+    await api(`/api/vocab/start?session_id=${encodeURIComponent(getSession())}`, { method:"POST" });
   }
 
   async function loadNext() {
     if (ended) return;
     if (completed >= MAX_ITEMS) {
-      endGame();
+      await endGame();
       return;
     }
     const r = await api(`/api/vocab/next?session_id=${encodeURIComponent(getSession())}`);
     if (r.done || !r.item) {
-      endGame();
+      await endGame();
       return;
     }
     current = r.item;
@@ -633,6 +829,9 @@ async function initVocab() {
     setButtonsEnabled(false);
 
     const rt = Math.round(performance.now() - lastShownAt);
+
+    // Record for final one-shot save
+    trials.push({ token: current.token, user_answer: isWord ? "yes" : "no" });
 
     try {
       const res = await api("/api/vocab/answer", {
@@ -674,6 +873,7 @@ async function initVocab() {
   setButtonsEnabled(true);
   updateHUD();
 }
+
 
 // instructions.html
 async function initRCInstructions() {
@@ -1071,13 +1271,38 @@ async function initPostTask() {
 // final_check.html
 async function initFinalCheck() {
   ensureSessionOrRedirect();
-  renderRecaptchaWidgets(); // render if ready
 
-  const form = document.getElementById("final-form");
+  const form       = document.getElementById("final-form");
   const toolsBlock = document.getElementById("tools-block");
-  const otherBox = document.getElementById("toolOther");
-  const otherText = document.getElementById("toolOtherText");
+  const otherBox   = document.getElementById("toolOther");
+  const otherText  = document.getElementById("toolOtherText");
 
+  // --- reCAPTCHA setup ---
+  const recaptchaDiv   = document.getElementById("recaptcha");
+  const recaptchaToken = document.getElementById("recaptchaToken");
+  let recaptchaWidgetId = null;
+
+  function renderRecaptcha() {
+    if (!recaptchaDiv) return;
+    // Only render if we have a site key and grecaptcha is ready
+    const key = (window.RECAPTCHA_SITE_KEY || "").trim();
+    if (!key || !window.grecaptcha || recaptchaWidgetId !== null) return;
+    recaptchaWidgetId = grecaptcha.render(recaptchaDiv, {
+      sitekey: key,
+      callback: (token) => { if (recaptchaToken) recaptchaToken.value = token || ""; },
+      "expired-callback": () => { if (recaptchaToken) recaptchaToken.value = ""; },
+      "error-callback": () => { if (recaptchaToken) recaptchaToken.value = ""; },
+    });
+  }
+
+  // reCAPTCHA script loads async; attempt render on load & after a small delay
+  if (document.readyState !== "loading") {
+    // try once now
+    setTimeout(renderRecaptcha, 300);
+  }
+  window.addEventListener("load", () => setTimeout(renderRecaptcha, 100));
+
+  // --- existing UI plumbing ---
   function syncToolsBlock() {
     const used = (document.querySelector('input[name="used_ai_tools"]:checked') || {}).value;
     const show = (used === "Yes");
@@ -1105,7 +1330,20 @@ async function initFinalCheck() {
   if (form) {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const used = (document.querySelector('input[name="used_ai_tools"]:checked') || {}).value || null;
+
+      // If reCAPTCHA is rendered (prod), ensure token exists
+      try {
+        if (recaptchaWidgetId !== null && window.grecaptcha) {
+          const token = grecaptcha.getResponse(recaptchaWidgetId);
+          if (recaptchaToken) recaptchaToken.value = token || "";
+          if (!token) {
+            alert("Please complete the reCAPTCHA.");
+            return;
+          }
+        }
+      } catch (_) { /* ignore (dev bypass may be on) */ }
+
+      const used  = (document.querySelector('input[name="used_ai_tools"]:checked') || {}).value || null;
       const tools = Array.from(document.querySelectorAll('input[name="tool"]:checked')).map(cb => cb.value);
       const other = (tools.includes("Other") ? (otherText?.value || "").trim() : "");
 
@@ -1114,26 +1352,31 @@ async function initFinalCheck() {
         if (!hasAny) { alert("Please select at least one tool you used or specify it in 'Other'."); return; }
       }
 
-      // reCAPTCHA token (required only if site key configured)
-      renderRecaptchaWidgets();
-      const rToken = getRecaptchaTokenFromForm(form);
-      if (recaptchaEnabled() && !rToken) {
-        alert("Please complete the reCAPTCHA box before continuing.");
+      const payload = {
+        used_ai_tools: used,
+        tools,
+        other_tool: other,
+        recaptcha_token: recaptchaToken ? recaptchaToken.value : ""
+      };
+
+      try {
+        await api(`/api/final_check?session_id=${encodeURIComponent(getSession())}`, {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        console.error("[final_check] submit failed:", err);
+        alert("Sorry—saving your final check hit an error. Please try again.");
         return;
       }
-
-      const payload = { used_ai_tools: used, tools, other_tool: other, recaptcha_token: rToken || null };
-      await api(`/api/final_check?session_id=${encodeURIComponent(getSession())}`, {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
-      });
 
       markInAppNavigation();
       location.href = "thanks.html";
     });
   }
 }
+
 
 // thanks.html — record total participation time
 async function initThanks() {

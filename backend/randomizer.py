@@ -1,7 +1,7 @@
 # backend/randomizer.py
 import random
 from typing import List
-from data import PASSAGES, QUESTIONS
+from backend.data import PASSAGES, QUESTIONS
 
 def _has_six_any(pid: str) -> bool:
     node = QUESTIONS.get(pid) or {}
